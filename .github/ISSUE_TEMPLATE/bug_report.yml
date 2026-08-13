@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a reproducible problem in Codex Usage Notch
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. The formal application is still in development. Remove private data from every field and attachment.
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      description: "Example: Windows 11 24H2, build 26100"
+    validations:
+      required: true
+  - type: input
+    id: codex-version
+    attributes:
+      label: Codex Desktop version
+      description: Provide the visible application version; do not attach auth files.
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: Codex Usage Notch version
+      description: Use "unreleased" if no packaged application exists.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Codex usage integration
+        - Windows window attachment
+        - Usage panel
+        - Installation or launch
+        - Documentation or repository tooling
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start ...
+        2. Move or resize ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste only the minimum relevant output. Remove account data, personal paths, prompts, code, tokens, cookies, credentials, and auth material.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I did not include a token, cookie, credential, password, auth file, private prompt, conversation, account data, or private project code.
+          required: true
+        - label: I sanitized logs, paths, and screenshots before attaching them.
+          required: true
+  - type: checkboxes
+    id: duplicate
+    attributes:
+      label: Duplicate check
+      options:
+        - label: I searched existing issues before opening this report.
+          required: true

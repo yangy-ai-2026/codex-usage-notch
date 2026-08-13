@@ -1,0 +1,66 @@
+# Environment and secrets
+.env*
+!.env.example
+**/auth.json
+**/credentials.json
+**/*.credentials.json
+**/secrets.*
+**/*.secret.*
+**/cookies.txt
+**/*.token
+**/*.secret
+**/*.secrets
+*.pem
+*.key
+
+# Codex and AI-tool local state
+.codex/
+.claude/
+
+# Internal development evidence (local only)
+.internal/
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+out/
+target/
+src-tauri/target/
+coverage/
+.turbo/
+
+# Generated binaries and symbols
+*.exe
+*.dll
+*.pdb
+*.msi
+
+# Logs, diagnostics, and local evidence
+*.log
+*.jsonl
+logs/
+diagnostics/
+*-result-*.json
+*debug*.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.swp
+~$*
+
+# IDE-local data
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
