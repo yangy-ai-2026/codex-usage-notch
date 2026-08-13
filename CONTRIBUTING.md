@@ -4,7 +4,7 @@ Thanks for helping build Codex Usage Notch.
 
 ## Development Status
 
-`v0.1.0` is in development, and the formal application has not been implemented. Before proposing implementation work, review the [public roadmap](ROADMAP.md).
+`v0.1.0` is in development, and the application foundation is being built. Before proposing implementation work, review the [public roadmap](ROADMAP.md).
 
 ## Issues and Feature Requests
 
@@ -28,7 +28,7 @@ Maintainers may ask contributors to split broad pull requests or move work to th
 
 ## Testing
 
-Run the checks relevant to the files you changed and record the exact commands and results in the pull request. New behavior should include tests when a testable implementation exists. Documentation-only changes should verify links, formatting, and terminology. Build and test commands will be documented when the formal application scaffold exists.
+Run the checks relevant to the files you changed and record the exact commands and results in the pull request. New behavior should include tests when a testable implementation exists. Documentation-only changes should verify links, formatting, and terminology. For the current scaffold, run `npm.cmd run build` and `cargo test --manifest-path src-tauri/Cargo.toml` when the local Windows C++ linker is available; record environment limitations separately from code results.
 
 ## Security and Privacy
 
