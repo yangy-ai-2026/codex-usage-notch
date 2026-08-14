@@ -1,5 +1,6 @@
 [package]
 name = "codex-usage-notch"
+default-run = "codex-usage-notch"
 version = "0.1.0"
 description = "Codex Usage Notch native application"
 authors = ["Codex Usage Notch contributors"]
