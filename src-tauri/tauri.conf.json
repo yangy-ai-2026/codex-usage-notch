@@ -12,9 +12,14 @@
     "windows": [
       {
         "title": "Codex Usage Notch",
-        "width": 720,
-        "height": 640,
-        "resizable": true
+        "width": 480,
+        "height": 64,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "maximizable": false,
+        "visible": false,
+        "skipTaskbar": true
       }
     ],
     "security": { "csp": null }
