@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod native_overlay;
+pub mod native_renderer;
 pub mod window_geometry;
 pub mod window_tracker;
 
@@ -46,10 +47,10 @@ pub fn run() {
                 let window = app
                     .get_webview_window("main")
                     .ok_or_else(|| "main Notch window is unavailable".to_string())?;
-                let hwnd = window
-                    .hwnd()
-                    .map_err(|error| format!("failed to get Notch HWND: {error}"))?;
-                native_overlay::start(hwnd.0 as usize as u64);
+                window
+                    .hide()
+                    .map_err(|error| format!("failed to hide Tauri controller window: {error}"))?;
+                native_overlay::start();
             }
             Ok(())
         })
