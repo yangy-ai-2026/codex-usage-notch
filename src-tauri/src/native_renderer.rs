@@ -1,4 +1,4 @@
-use crate::engine::{RuntimeStatus, UsageSnapshot};
+use crate::engine::{CreditSnapshot, CreditStatus, RuntimeStatus, UsageSnapshot};
 use crate::window_geometry::WindowSize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,16 +12,19 @@ pub struct NativeRenderWindow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeRenderModel {
     pub status: RuntimeStatus,
+    pub credit_status: CreditStatus,
     pub expanded: bool,
     pub size: WindowSize,
     pub title: String,
     pub primary_percentage: String,
     pub status_label: String,
+    pub credit_label: String,
     pub windows: Vec<NativeRenderWindow>,
 }
 
 pub fn build_render_model(
     snapshot: &UsageSnapshot,
+    credits: &CreditSnapshot,
     expanded: bool,
     size: WindowSize,
 ) -> NativeRenderModel {
@@ -39,6 +42,7 @@ pub fn build_render_model(
 
     NativeRenderModel {
         status: snapshot.status.clone(),
+        credit_status: credits.status.clone(),
         expanded,
         size,
         title: if expanded {
@@ -48,6 +52,7 @@ pub fn build_render_model(
         },
         primary_percentage,
         status_label: status_label(&snapshot.status),
+        credit_label: credit_label(credits),
         windows: snapshot
             .windows
             .iter()
@@ -58,6 +63,39 @@ pub fn build_render_model(
                 remaining_percent: window.remaining_percent,
             })
             .collect(),
+    }
+}
+
+fn credit_label(snapshot: &CreditSnapshot) -> String {
+    let balance = snapshot
+        .balance
+        .as_deref()
+        .map(format_credit_balance)
+        .unwrap_or_else(|| "—".to_string());
+    match &snapshot.status {
+        CreditStatus::Loading => "Credits — · Reading".to_string(),
+        CreditStatus::Available => format!("Credits {balance}"),
+        CreditStatus::Unlimited => "Credits ∞".to_string(),
+        CreditStatus::Unavailable => "Credits —".to_string(),
+        CreditStatus::Stale => format!("Credits {balance} · Stale"),
+        CreditStatus::Error => "Credits — · Error".to_string(),
+    }
+}
+
+fn format_credit_balance(balance: &str) -> String {
+    let Ok(value) = balance.parse::<f64>() else {
+        return balance.to_string();
+    };
+    if !value.is_finite() {
+        return balance.to_string();
+    }
+
+    let formatted = format!("{value:.2}");
+    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+    if trimmed == "-0" {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -404,11 +442,32 @@ fn draw_text_surface(hdc: windows::Win32::Graphics::Gdi::HDC, model: &NativeRend
                     false,
                 );
             }
+            let credit_color = if matches!(
+                &model.credit_status,
+                CreditStatus::Available | CreditStatus::Unlimited
+            ) {
+                white
+            } else {
+                muted
+            };
+            draw_text(
+                hdc,
+                &model.credit_label,
+                rect(
+                    scaled(22, scale),
+                    model.size.height - scaled(18, scale),
+                    model.size.width - scaled(22, scale),
+                    model.size.height - scaled(3, scale),
+                ),
+                small_size,
+                credit_color,
+                true,
+            );
         } else {
             draw_text(
                 hdc,
                 &model.title,
-                rect(scaled(44, scale), 0, scaled(160, scale), model.size.height),
+                rect(scaled(44, scale), 0, scaled(110, scale), model.size.height),
                 title_size,
                 white,
                 true,
@@ -416,7 +475,7 @@ fn draw_text_surface(hdc: windows::Win32::Graphics::Gdi::HDC, model: &NativeRend
             draw_text(
                 hdc,
                 &model.primary_percentage,
-                rect(scaled(190, scale), 0, scaled(290, scale), model.size.height),
+                rect(scaled(118, scale), 0, scaled(170, scale), model.size.height),
                 title_size,
                 accent,
                 true,
@@ -424,15 +483,38 @@ fn draw_text_surface(hdc: windows::Win32::Graphics::Gdi::HDC, model: &NativeRend
             draw_text(
                 hdc,
                 &model.status_label,
+                rect(scaled(178, scale), 0, scaled(224, scale), model.size.height),
+                small_size,
+                muted,
+                false,
+            );
+            draw_text(
+                hdc,
+                "·",
+                rect(scaled(226, scale), 0, scaled(236, scale), model.size.height),
+                small_size,
+                muted,
+                false,
+            );
+            draw_text(
+                hdc,
+                &model.credit_label,
                 rect(
-                    scaled(302, scale),
+                    scaled(238, scale),
                     0,
                     model.size.width - scaled(20, scale),
                     model.size.height,
                 ),
                 small_size,
-                muted,
-                false,
+                if matches!(
+                    &model.credit_status,
+                    CreditStatus::Available | CreditStatus::Unlimited
+                ) {
+                    white
+                } else {
+                    muted
+                },
+                true,
             );
         }
     }
@@ -579,8 +661,8 @@ fn premultiplied_bgra(red: u32, green: u32, blue: u32, alpha: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::build_render_model;
-    use crate::engine::{RuntimeStatus, UsageSnapshot, UsageWindow};
+    use super::{build_render_model, format_credit_balance};
+    use crate::engine::{CreditSnapshot, CreditStatus, RuntimeStatus, UsageSnapshot, UsageWindow};
     use crate::window_geometry::WindowSize;
 
     fn snapshot(status: RuntimeStatus, windows: Vec<UsageWindow>) -> UsageSnapshot {
@@ -607,10 +689,23 @@ mod tests {
         }
     }
 
+    fn credits(status: CreditStatus, balance: Option<&str>) -> CreditSnapshot {
+        CreditSnapshot {
+            has_credits: matches!(status, CreditStatus::Available | CreditStatus::Unlimited),
+            unlimited: status == CreditStatus::Unlimited,
+            balance: balance.map(str::to_string),
+            status,
+            fetched_at: Some(1),
+            last_successful_at: Some(1),
+            diagnostic_code: None,
+        }
+    }
+
     #[test]
     fn collapsed_model_uses_real_primary_remaining_percentage() {
         let model = build_render_model(
             &snapshot(RuntimeStatus::Partial, vec![window(10080, 42)]),
+            &credits(CreditStatus::Unavailable, None),
             false,
             WindowSize {
                 width: 480,
@@ -625,6 +720,7 @@ mod tests {
     fn unavailable_model_does_not_invent_a_percentage() {
         let model = build_render_model(
             &snapshot(RuntimeStatus::Unavailable, Vec::new()),
+            &credits(CreditStatus::Unavailable, None),
             false,
             WindowSize {
                 width: 480,
@@ -642,6 +738,7 @@ mod tests {
                 RuntimeStatus::Fresh,
                 vec![window(300, 80), window(10080, 42)],
             ),
+            &credits(CreditStatus::Unavailable, None),
             true,
             WindowSize {
                 width: 500,
@@ -657,6 +754,7 @@ mod tests {
     fn stale_model_keeps_the_last_valid_window_value() {
         let model = build_render_model(
             &snapshot(RuntimeStatus::Stale, vec![window(10080, 0)]),
+            &credits(CreditStatus::Unavailable, None),
             false,
             WindowSize {
                 width: 480,
@@ -665,5 +763,115 @@ mod tests {
         );
         assert_eq!(model.primary_percentage, "0%");
         assert_eq!(model.status_label, "Stale");
+    }
+
+    #[test]
+    fn available_credit_balance_renders_exactly() {
+        let model = build_render_model(
+            &snapshot(RuntimeStatus::Partial, vec![window(10080, 42)]),
+            &credits(CreditStatus::Available, Some("827.9644120000")),
+            false,
+            WindowSize {
+                width: 480,
+                height: 64,
+            },
+        );
+        assert_eq!(model.credit_label, "Credits 827.96");
+    }
+
+    #[test]
+    fn expanded_model_renders_compact_credit_row() {
+        let model = build_render_model(
+            &snapshot(RuntimeStatus::Partial, vec![window(10080, 42)]),
+            &credits(CreditStatus::Available, Some("841.5000")),
+            true,
+            WindowSize {
+                width: 500,
+                height: 112,
+            },
+        );
+        assert_eq!(model.credit_label, "Credits 841.5");
+        assert_eq!(
+            model.size,
+            WindowSize {
+                width: 500,
+                height: 112
+            }
+        );
+    }
+
+    #[test]
+    fn unlimited_credit_balance_renders_separately() {
+        let model = build_render_model(
+            &snapshot(RuntimeStatus::Fresh, vec![window(10080, 42)]),
+            &credits(CreditStatus::Unlimited, None),
+            false,
+            WindowSize {
+                width: 480,
+                height: 64,
+            },
+        );
+        assert_eq!(model.credit_label, "Credits ∞");
+    }
+
+    #[test]
+    fn missing_and_null_credit_balance_render_honestly() {
+        for status in [CreditStatus::Unavailable, CreditStatus::Error] {
+            let model = build_render_model(
+                &snapshot(RuntimeStatus::Fresh, vec![window(10080, 42)]),
+                &credits(status, None),
+                false,
+                WindowSize {
+                    width: 480,
+                    height: 64,
+                },
+            );
+            assert!(model.credit_label.contains("Credits —"));
+            assert!(!model.credit_label.contains('0'));
+        }
+    }
+
+    #[test]
+    fn stale_credit_balance_preserves_last_value_and_marks_state() {
+        let model = build_render_model(
+            &snapshot(RuntimeStatus::Partial, vec![window(10080, 42)]),
+            &credits(CreditStatus::Stale, Some("841")),
+            true,
+            WindowSize {
+                width: 500,
+                height: 112,
+            },
+        );
+        assert_eq!(model.credit_label, "Credits 841 · Stale");
+        assert_eq!(model.status, RuntimeStatus::Partial);
+        assert_eq!(model.credit_status, CreditStatus::Stale);
+    }
+
+    #[test]
+    fn purchased_balance_label_does_not_use_reset_credit_count() {
+        let model = build_render_model(
+            &snapshot(RuntimeStatus::Fresh, vec![window(10080, 42)]),
+            &credits(CreditStatus::Available, Some("841")),
+            false,
+            WindowSize {
+                width: 480,
+                height: 64,
+            },
+        );
+        assert_eq!(model.credit_label, "Credits 841");
+        assert!(!model.credit_label.contains("3"));
+    }
+
+    #[test]
+    fn credit_balance_formatter_trims_to_two_decimal_places() {
+        assert_eq!(format_credit_balance("827.9644120000"), "827.96");
+        assert_eq!(format_credit_balance("841.5000"), "841.5");
+        assert_eq!(format_credit_balance("841.0000"), "841");
+    }
+
+    #[test]
+    fn invalid_credit_balance_falls_back_to_original_string() {
+        assert_eq!(format_credit_balance("balance-unknown"), "balance-unknown");
+        assert_eq!(format_credit_balance("NaN"), "NaN");
     }
 }
