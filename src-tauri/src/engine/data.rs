@@ -15,6 +15,43 @@ pub enum RuntimeStatus {
     Error,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CreditStatus {
+    Loading,
+    Available,
+    Unlimited,
+    Unavailable,
+    Stale,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreditSnapshot {
+    pub has_credits: bool,
+    pub unlimited: bool,
+    pub balance: Option<String>,
+    pub status: CreditStatus,
+    pub fetched_at: Option<u64>,
+    pub last_successful_at: Option<u64>,
+    pub diagnostic_code: Option<String>,
+}
+
+impl CreditSnapshot {
+    pub fn loading() -> Self {
+        Self {
+            has_credits: false,
+            unlimited: false,
+            balance: None,
+            status: CreditStatus::Loading,
+            fetched_at: None,
+            last_successful_at: None,
+            diagnostic_code: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageWindow {
@@ -37,6 +74,49 @@ pub struct UsageSnapshot {
     pub source: String,
     pub capability: String,
     pub diagnostic_code: Option<String>,
+}
+
+pub fn normalize_credit_snapshot(response: &Value, fetched_at: u64) -> CreditSnapshot {
+    let credits = response
+        .get("result")
+        .and_then(|result| result.get("rateLimits"))
+        .or_else(|| response.get("rateLimits"))
+        .and_then(|rate_limits| rate_limits.get("credits"))
+        .filter(|value| !value.is_null());
+
+    let has_credits = credits
+        .and_then(|value| value.get("hasCredits"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let unlimited = credits
+        .and_then(|value| value.get("unlimited"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let balance = credits
+        .and_then(|value| value.get("balance"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let status = if unlimited {
+        CreditStatus::Unlimited
+    } else if has_credits && balance.is_some() {
+        CreditStatus::Available
+    } else {
+        CreditStatus::Unavailable
+    };
+    let last_successful_at = match status {
+        CreditStatus::Available | CreditStatus::Unlimited => Some(fetched_at),
+        _ => None,
+    };
+
+    CreditSnapshot {
+        has_credits,
+        unlimited,
+        balance,
+        status,
+        fetched_at: Some(fetched_at),
+        last_successful_at,
+        diagnostic_code: None,
+    }
 }
 
 #[derive(Debug, Error)]
@@ -145,6 +225,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn credits_response(credits: Value) -> Value {
+        json!({"rateLimits": {"credits": credits}})
+    }
+
     #[test]
     fn normalizes_single_seven_day_window_without_inventing_secondary() {
         let response = json!({"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 18, "windowDurationMins": 10080, "resetsAt": 1787198350}, "secondary": null}});
@@ -173,5 +257,65 @@ mod tests {
         let response = json!({"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 50, "windowDurationMins": 60, "futureField": "ignored"}}});
         let windows = normalize_rate_limits(&response).expect("valid response");
         assert_eq!(windows[0].resets_at, None);
+    }
+
+    #[test]
+    fn normalizes_available_credit_balance_without_parsing_it() {
+        let snapshot = normalize_credit_snapshot(
+            &credits_response(json!({
+                "hasCredits": true,
+                "unlimited": false,
+                "balance": "841.00"
+            })),
+            42,
+        );
+        assert_eq!(snapshot.status, CreditStatus::Available);
+        assert_eq!(snapshot.balance.as_deref(), Some("841.00"));
+        assert_eq!(snapshot.last_successful_at, Some(42));
+    }
+
+    #[test]
+    fn normalizes_unlimited_credits_as_a_distinct_state() {
+        let snapshot = normalize_credit_snapshot(
+            &credits_response(json!({
+                "hasCredits": true,
+                "unlimited": true,
+                "balance": null
+            })),
+            42,
+        );
+        assert_eq!(snapshot.status, CreditStatus::Unlimited);
+        assert!(snapshot.unlimited);
+        assert_eq!(snapshot.balance, None);
+    }
+
+    #[test]
+    fn missing_or_null_credit_balance_is_unavailable_not_zero() {
+        let missing = normalize_credit_snapshot(&json!({"rateLimits": {}}), 42);
+        let null_balance = normalize_credit_snapshot(
+            &credits_response(json!({
+                "hasCredits": true,
+                "unlimited": false,
+                "balance": null
+            })),
+            42,
+        );
+        assert_eq!(missing.status, CreditStatus::Unavailable);
+        assert_eq!(missing.balance, None);
+        assert_eq!(null_balance.status, CreditStatus::Unavailable);
+        assert_eq!(null_balance.balance, None);
+    }
+
+    #[test]
+    fn purchased_balance_is_separate_from_rate_limit_reset_credits() {
+        let response = json!({
+            "rateLimits": {
+                "credits": {"hasCredits": true, "unlimited": false, "balance": "841"}
+            },
+            "rateLimitResetCredits": {"availableCount": 3}
+        });
+        let snapshot = normalize_credit_snapshot(&response, 42);
+        assert_eq!(snapshot.balance.as_deref(), Some("841"));
+        assert_ne!(snapshot.balance.as_deref(), Some("3"));
     }
 }

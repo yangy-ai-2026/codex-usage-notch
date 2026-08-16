@@ -7,7 +7,7 @@ use crate::window_geometry::{
 use crate::window_tracker::WindowDiscovery;
 
 #[cfg(windows)]
-use crate::engine::{Engine, RuntimeStatus, UsageSnapshot};
+use crate::engine::{CreditSnapshot, CreditStatus, Engine, RuntimeStatus, UsageSnapshot};
 
 #[cfg(windows)]
 use crate::native_renderer::{build_render_model, render_layered_window, NativeRenderModel};
@@ -64,6 +64,13 @@ enum HoverState {
     HoverPending,
     Expanded,
     CollapsePending,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq)]
+struct NativeRuntimeSnapshot {
+    usage: UsageSnapshot,
+    credits: CreditSnapshot,
 }
 
 #[cfg(windows)]
@@ -259,15 +266,15 @@ fn run() {
 
     let mut discovery = WindowDiscovery::default();
     let mut attached_target = None;
-    let (usage_sender, usage_receiver) = std::sync::mpsc::channel();
-    let usage_worker = spawn_usage_worker(usage_sender);
+    let (runtime_sender, runtime_receiver) = std::sync::mpsc::channel();
+    let usage_worker = spawn_usage_worker(runtime_sender);
     let hooks = message_hooks();
 
     message_loop(
         window.hwnd,
         &mut discovery,
         &mut attached_target,
-        &usage_receiver,
+        &runtime_receiver,
     );
     let _ = usage_worker.join();
 
@@ -339,17 +346,21 @@ fn create_native_window(instance: windows::Win32::Foundation::HINSTANCE) -> Opti
 
 #[cfg(windows)]
 fn spawn_usage_worker(
-    sender: std::sync::mpsc::Sender<UsageSnapshot>,
+    sender: std::sync::mpsc::Sender<NativeRuntimeSnapshot>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("codex-notch-usage-reader".to_string())
         .spawn(move || {
             let engine = Engine::default();
-            let mut previous = None;
+            let mut previous: Option<NativeRuntimeSnapshot> = None;
             while !TRACKER_STOP.load(Ordering::Acquire) {
                 let snapshot = engine
-                    .read_with_recovery(previous.clone())
-                    .unwrap_or_else(|_| native_error_snapshot(previous.as_ref()));
+                    .read_usage_and_credits_with_recovery(
+                        previous.as_ref().map(|snapshot| snapshot.usage.clone()),
+                        previous.as_ref().map(|snapshot| snapshot.credits.clone()),
+                    )
+                    .map(|(usage, credits)| NativeRuntimeSnapshot { usage, credits })
+                    .unwrap_or_else(|_| native_error_runtime_snapshot(previous.as_ref()));
                 previous = Some(snapshot.clone());
                 if sender.send(snapshot).is_err() {
                     return;
@@ -367,23 +378,34 @@ fn spawn_usage_worker(
 }
 
 #[cfg(windows)]
-fn loading_snapshot() -> UsageSnapshot {
-    UsageSnapshot {
-        windows: Vec::new(),
-        status: RuntimeStatus::Loading,
-        fetched_at: None,
-        last_successful_at: None,
-        source: "codex-owned-local-app-server".to_string(),
-        capability: "account/rateLimits/read".to_string(),
-        diagnostic_code: None,
+fn loading_snapshot() -> NativeRuntimeSnapshot {
+    NativeRuntimeSnapshot {
+        usage: UsageSnapshot {
+            windows: Vec::new(),
+            status: RuntimeStatus::Loading,
+            fetched_at: None,
+            last_successful_at: None,
+            source: "codex-owned-local-app-server".to_string(),
+            capability: "account/rateLimits/read".to_string(),
+            diagnostic_code: None,
+        },
+        credits: CreditSnapshot::loading(),
     }
 }
 
 #[cfg(windows)]
-fn native_error_snapshot(previous: Option<&UsageSnapshot>) -> UsageSnapshot {
+fn native_error_runtime_snapshot(
+    previous: Option<&NativeRuntimeSnapshot>,
+) -> NativeRuntimeSnapshot {
     let mut snapshot = previous.cloned().unwrap_or_else(loading_snapshot);
-    snapshot.status = RuntimeStatus::Error;
-    snapshot.diagnostic_code = Some("native_usage_read_failed".to_string());
+    snapshot.usage.status = RuntimeStatus::Error;
+    snapshot.usage.diagnostic_code = Some("native_usage_read_failed".to_string());
+    if snapshot.credits.last_successful_at.is_some() {
+        snapshot.credits.status = CreditStatus::Stale;
+    } else {
+        snapshot.credits.status = CreditStatus::Error;
+    }
+    snapshot.credits.diagnostic_code = Some("native_credit_read_failed".to_string());
     snapshot
 }
 
@@ -392,7 +414,7 @@ fn message_loop(
     overlay: windows::Win32::Foundation::HWND,
     discovery: &mut WindowDiscovery,
     attached_target: &mut Option<u64>,
-    usage_receiver: &std::sync::mpsc::Receiver<UsageSnapshot>,
+    runtime_receiver: &std::sync::mpsc::Receiver<NativeRuntimeSnapshot>,
 ) {
     use std::time::{Duration, Instant};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -425,7 +447,7 @@ fn message_loop(
         }
 
         let mut usage_changed = false;
-        while let Ok(next_snapshot) = usage_receiver.try_recv() {
+        while let Ok(next_snapshot) = runtime_receiver.try_recv() {
             snapshot = next_snapshot;
             usage_changed = true;
         }
@@ -597,7 +619,7 @@ fn sync_overlay(
     overlay: windows::Win32::Foundation::HWND,
     discovery: &mut WindowDiscovery,
     attached_target: &mut Option<u64>,
-    snapshot: &UsageSnapshot,
+    snapshot: &NativeRuntimeSnapshot,
     rendered_model: &mut Option<NativeRenderModel>,
 ) -> Option<NotchPlacement> {
     use std::ffi::c_void;
@@ -650,7 +672,12 @@ fn sync_overlay(
     };
     let notch_size = scale_size_for_dpi(design_size, geometry.dpi);
     let placement = place_top_center(geometry.frame_bounds, geometry.work_area, notch_size, 8);
-    let model = build_render_model(snapshot, EXPANDED.load(Ordering::Acquire), notch_size);
+    let model = build_render_model(
+        &snapshot.usage,
+        &snapshot.credits,
+        EXPANDED.load(Ordering::Acquire),
+        notch_size,
+    );
     let render_ready = if rendered_model.as_ref() == Some(&model) {
         true
     } else if render_layered_window(overlay, &model) {
@@ -777,8 +804,73 @@ fn hide_overlay_and_clear_owner(
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::{HoverController, HoverState, HOVER_COLLAPSE_DELAY_MS, HOVER_EXPAND_DELAY_MS};
+    use super::{
+        HoverController, HoverState, NativeRuntimeSnapshot, HOVER_COLLAPSE_DELAY_MS,
+        HOVER_EXPAND_DELAY_MS,
+    };
+    use crate::engine::{CreditSnapshot, CreditStatus, RuntimeStatus, UsageSnapshot};
     use std::time::{Duration, Instant};
+
+    fn runtime_snapshot(status: CreditStatus, balance: Option<&str>) -> NativeRuntimeSnapshot {
+        NativeRuntimeSnapshot {
+            usage: UsageSnapshot {
+                windows: Vec::new(),
+                status: RuntimeStatus::Partial,
+                fetched_at: Some(1),
+                last_successful_at: Some(1),
+                source: "test".to_string(),
+                capability: "account/rateLimits/read".to_string(),
+                diagnostic_code: None,
+            },
+            credits: CreditSnapshot {
+                has_credits: matches!(status, CreditStatus::Available | CreditStatus::Unlimited),
+                unlimited: status == CreditStatus::Unlimited,
+                balance: balance.map(str::to_string),
+                status,
+                fetched_at: Some(1),
+                last_successful_at: Some(1),
+                diagnostic_code: None,
+            },
+        }
+    }
+
+    #[test]
+    fn native_runtime_channel_receives_available_credit_snapshot() {
+        let expected = runtime_snapshot(CreditStatus::Available, Some("841.00"));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(expected.clone())
+            .expect("runtime snapshot send");
+
+        let received = receiver.try_recv().expect("runtime snapshot receive");
+        assert_eq!(received, expected);
+        assert_eq!(received.credits.balance.as_deref(), Some("841.00"));
+    }
+
+    #[test]
+    fn native_runtime_propagates_unlimited_unavailable_and_stale_states() {
+        for (status, balance) in [
+            (CreditStatus::Unlimited, None),
+            (CreditStatus::Unavailable, None),
+            (CreditStatus::Stale, Some("841.00")),
+            (CreditStatus::Error, None),
+        ] {
+            let snapshot = runtime_snapshot(status.clone(), balance);
+            assert_eq!(snapshot.credits.status, status);
+            assert_eq!(snapshot.credits.balance.as_deref(), balance);
+        }
+    }
+
+    #[test]
+    fn credit_updates_do_not_change_usage_snapshot_or_require_usage_status_match() {
+        let available = runtime_snapshot(CreditStatus::Available, Some("841.00"));
+        assert_eq!(available.usage.status, RuntimeStatus::Partial);
+
+        let mut updated = available.clone();
+        updated.credits = runtime_snapshot(CreditStatus::Stale, Some("841.00")).credits;
+        assert_eq!(updated.usage, available.usage);
+        assert_eq!(updated.credits.status, CreditStatus::Stale);
+    }
 
     #[test]
     fn hover_state_machine_delays_expand_and_collapse_and_cancels_leave() {
