@@ -2,9 +2,9 @@
 
 > The usage notch that stays attached to your Codex window on Windows.
 
-**Status:** `v0.1.0 — in development`
+**Status:** `v0.1.0 — Phase 5 CLOSED / PASS; release work remains`
 
-Codex Usage Notch is an early-stage, lightweight Windows utility that keeps account usage information close to the Codex Desktop window. The v0.1.0 application foundation and usage engine are under active development; no public build is currently available.
+Codex Usage Notch is an early-stage, lightweight Windows utility that keeps account usage information close to the Codex Desktop window. The v0.1.0 application foundation, usage engine, and Phase 5 native Notch foundation are validated locally; no public build is currently available.
 
 ## Why
 
@@ -30,8 +30,8 @@ The initial target is Windows 10 and Windows 11. macOS and Linux are outside the
 
 - The product is in early development.
 - The core usage-data and Windows window-attachment approaches have been validated locally.
-- The Tauri/React application foundation and Codex-owned usage engine are being developed.
-- The production Notch/window attachment UI, installer, and release do not exist yet.
+- The Tauri/React application foundation, Codex-owned usage engine, and native Windows Notch foundation are validated through Phase 5.
+- A public production build, installer, and release do not exist yet.
 
 ## Privacy Principles
 

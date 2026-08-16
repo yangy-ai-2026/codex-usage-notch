@@ -7,6 +7,8 @@
 - Hover usage panel
 - Windows installer
 
+Current foundation status: `Phase 5 CLOSED / PASS`.
+
 ## Later
 
 - Stability improvements
