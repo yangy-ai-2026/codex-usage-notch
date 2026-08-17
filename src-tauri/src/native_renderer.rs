@@ -14,12 +14,63 @@ pub struct NativeRenderModel {
     pub status: RuntimeStatus,
     pub credit_status: CreditStatus,
     pub expanded: bool,
+    pub edge_tab: bool,
     pub size: WindowSize,
     pub title: String,
     pub primary_percentage: String,
     pub status_label: String,
     pub credit_label: String,
+    pub credit_value: Option<String>,
     pub windows: Vec<NativeRenderWindow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CompactLayout {
+    width: i32,
+    icon_left: i32,
+    icon_right: i32,
+    title_left: i32,
+    title_right: i32,
+    percentage_left: i32,
+    percentage_right: i32,
+    credit_left: i32,
+    credit_label_right: i32,
+    credit_value_left: Option<i32>,
+    credit_value_right: Option<i32>,
+    credit_right: i32,
+    separator_left: i32,
+    separator_right: i32,
+    status_left: i32,
+    status_right: i32,
+    chevron_center_x: i32,
+}
+
+const COMPACT_CREDIT_VALUE_RIGHT_PADDING: i32 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExpandedRowLayout {
+    top: i32,
+    helper_top: i32,
+    bar_top: i32,
+}
+
+pub fn expanded_height_for_window_count(window_count: usize) -> i32 {
+    let rows = window_count.max(1) as i32;
+    if rows == 1 {
+        80
+    } else {
+        29 + rows * 36 + (rows - 1) * 6 + 8
+    }
+}
+
+fn expanded_row_layout(window_count: usize, index: usize) -> ExpandedRowLayout {
+    let rows = window_count.max(1);
+    let row_top = 29 + (index.min(rows - 1) as i32 * 42);
+    ExpandedRowLayout {
+        top: row_top,
+        helper_top: row_top + 15,
+        bar_top: row_top + 32,
+    }
 }
 
 pub fn build_render_model(
@@ -44,15 +95,20 @@ pub fn build_render_model(
         status: snapshot.status.clone(),
         credit_status: credits.status.clone(),
         expanded,
+        edge_tab: false,
         size,
-        title: if expanded {
-            "Codex Usage".to_string()
-        } else {
-            "Codex".to_string()
-        },
+        title: "Codex".to_string(),
         primary_percentage,
         status_label: status_label(&snapshot.status),
         credit_label: credit_label(credits),
+        credit_value: if matches!(
+            &credits.status,
+            CreditStatus::Available | CreditStatus::Stale
+        ) {
+            credits.balance.as_deref().map(format_credit_balance)
+        } else {
+            None
+        },
         windows: snapshot
             .windows
             .iter()
@@ -63,6 +119,239 @@ pub fn build_render_model(
                 remaining_percent: window.remaining_percent,
             })
             .collect(),
+    }
+}
+
+#[cfg(windows)]
+pub fn compact_width_for_snapshot(snapshot: &UsageSnapshot, credits: &CreditSnapshot) -> i32 {
+    let model = build_render_model(
+        snapshot,
+        credits,
+        false,
+        WindowSize {
+            width: 1,
+            height: 40,
+        },
+    );
+    let screen_dc = unsafe { windows::Win32::Graphics::Gdi::GetDC(None) };
+    if screen_dc.is_invalid() {
+        return fallback_compact_layout(&model).width;
+    }
+    let width = measured_compact_layout(screen_dc, &model).width;
+    unsafe {
+        let _ = windows::Win32::Graphics::Gdi::ReleaseDC(None, screen_dc);
+    }
+    width
+}
+
+#[cfg(windows)]
+fn measured_compact_layout(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    model: &NativeRenderModel,
+) -> CompactLayout {
+    let lightning_width = measure_text_width(hdc, "\u{26a1}", 16, 600);
+    let title_width = measure_text_width(hdc, &model.title, 16, 600);
+    let percentage_width = measure_text_width(hdc, &model.primary_percentage, 19, 700);
+    let credit_label_width = measure_text_width(hdc, "Credits", 11, 400);
+    let status_width = measure_text_width(hdc, &model.status_label, 11, 400);
+    let credit_value_width = model
+        .credit_value
+        .as_deref()
+        .map(|value| measure_text_width(hdc, value, 19, 700));
+    let credit_content_width = if model.credit_value.is_some() {
+        0
+    } else {
+        measure_text_width(hdc, &model.credit_label, 11, 400)
+    };
+    let credit_suffix_width = if compact_credit_suffix(model).is_some() {
+        measure_text_width(hdc, "· Stale", 11, 400)
+    } else {
+        0
+    };
+    compact_layout_from_widths(
+        lightning_width,
+        title_width,
+        percentage_width,
+        credit_label_width,
+        credit_value_width,
+        credit_suffix_width,
+        credit_content_width,
+        status_width,
+    )
+}
+
+#[cfg(not(windows))]
+pub fn compact_width_for_snapshot(snapshot: &UsageSnapshot, credits: &CreditSnapshot) -> i32 {
+    let model = build_render_model(
+        snapshot,
+        credits,
+        false,
+        WindowSize {
+            width: 1,
+            height: 40,
+        },
+    );
+    fallback_compact_layout(&model).width
+}
+
+fn compact_layout_from_widths(
+    lightning_width: i32,
+    title_width: i32,
+    percentage_width: i32,
+    credit_label_width: i32,
+    credit_value_width: Option<i32>,
+    credit_suffix_width: i32,
+    credit_content_width: i32,
+    status_width: i32,
+) -> CompactLayout {
+    let icon_left = 11;
+    let icon_right = icon_left + lightning_width.max(1) + 2;
+    let title_left = icon_right + 7;
+    let title_right = title_left + title_width;
+    let percentage_left = title_right + 8;
+    let percentage_right = percentage_left + percentage_width;
+    let credit_left = percentage_right + 8;
+    let credit_label_right = credit_left + credit_label_width;
+    let (credit_value_left, credit_value_right, credit_right) =
+        if let Some(value_width) = credit_value_width {
+            let value_left = credit_label_right + 3;
+            let value_right = value_left + value_width;
+            let suffix_gap = if credit_suffix_width > 0 { 3 } else { 0 };
+            (
+                Some(value_left),
+                Some(value_right),
+                value_right + suffix_gap + credit_suffix_width,
+            )
+        } else {
+            (None, None, credit_left + credit_content_width)
+        };
+    let separator_left = credit_right + 5;
+    let separator_right = separator_left + 3;
+    let status_left = separator_right + 5;
+    let status_right = status_left + status_width;
+    let chevron_center_x = status_right + 7 + 10;
+    let width = chevron_center_x + 10 + 8;
+
+    CompactLayout {
+        width,
+        icon_left,
+        icon_right,
+        title_left,
+        title_right,
+        percentage_left,
+        percentage_right,
+        credit_left,
+        credit_label_right,
+        credit_value_left,
+        credit_value_right,
+        credit_right,
+        separator_left,
+        separator_right,
+        status_left,
+        status_right,
+        chevron_center_x,
+    }
+}
+
+fn fallback_compact_layout(model: &NativeRenderModel) -> CompactLayout {
+    compact_layout_from_widths(
+        fallback_text_width("\u{26a1}", 16),
+        fallback_text_width(&model.title, 16),
+        fallback_text_width(&model.primary_percentage, 19),
+        fallback_text_width("Credits", 11),
+        model
+            .credit_value
+            .as_deref()
+            .map(|value| fallback_text_width(value, 19)),
+        model
+            .credit_value
+            .as_ref()
+            .map(|_| {
+                if compact_credit_suffix(model).is_some() {
+                    fallback_text_width("· Stale", 11)
+                } else {
+                    0
+                }
+            })
+            .unwrap_or(0),
+        if model.credit_value.is_some() {
+            0
+        } else {
+            fallback_text_width(&model.credit_label, 11)
+        },
+        fallback_text_width(&model.status_label, 11),
+    )
+}
+
+fn fallback_text_width(value: &str, size: i32) -> i32 {
+    (value.chars().count() as i32 * (size / 2).max(1)).max(1)
+}
+
+fn compact_credit_suffix(model: &NativeRenderModel) -> Option<&'static str> {
+    if model.credit_value.is_some() && matches!(model.credit_status, CreditStatus::Stale) {
+        Some("· Stale")
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn create_segoe_font(size: i32, weight: i32) -> windows::Win32::Graphics::Gdi::HFONT {
+    use windows::Win32::Graphics::Gdi::{
+        CreateFontW, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH,
+        FF_DONTCARE, OUT_DEFAULT_PRECIS,
+    };
+
+    unsafe {
+        CreateFontW(
+            -size,
+            0,
+            0,
+            0,
+            weight,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH.0 as u32 | FF_DONTCARE.0 as u32,
+            windows::core::w!("Segoe UI"),
+        )
+    }
+}
+
+#[cfg(windows)]
+fn measure_text_width(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    value: &str,
+    size: i32,
+    weight: i32,
+) -> i32 {
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::Graphics::Gdi::{
+        DeleteObject, GetTextExtentPoint32W, SelectObject, HGDIOBJ,
+    };
+
+    let value = if value.starts_with('\u{8def}') && value.ends_with(" Stale") {
+        "\u{00b7} Stale"
+    } else {
+        value
+    };
+    let font = create_segoe_font(size, weight);
+    let previous = unsafe { SelectObject(hdc, HGDIOBJ(font.0)) };
+    let text: Vec<u16> = value.encode_utf16().collect();
+    let mut extent = SIZE::default();
+    let measured = unsafe { GetTextExtentPoint32W(hdc, &text, &mut extent).as_bool() };
+    unsafe {
+        let _ = SelectObject(hdc, previous);
+        let _ = DeleteObject(HGDIOBJ(font.0));
+    }
+    if measured {
+        extent.cx.max(0)
+    } else {
+        0
     }
 }
 
@@ -136,8 +425,11 @@ fn format_reset(value: Option<&str>) -> String {
         return "Reset unavailable".to_string();
     };
     let days = seconds.div_euclid(86_400);
-    let (year, month, day) = civil_date_from_days(days);
-    format!("Reset {year:04}-{month:02}-{day:02}")
+    let (_, month, day) = civil_date_from_days(days);
+    let month_name = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ][month as usize - 1];
+    format!("Reset {month_name} {day}")
 }
 
 fn civil_date_from_days(days: i64) -> (i64, u32, u32) {
@@ -219,8 +511,19 @@ pub fn render_layered_window(
 
     let old_bitmap = unsafe { SelectObject(memory_dc, HGDIOBJ(bitmap.0)) };
     let pixels = unsafe { std::slice::from_raw_parts_mut(bits as *mut u32, width * height) };
-    draw_surface(pixels, model.size.width, model.size.height, model);
-    draw_text_surface(memory_dc, model);
+    let compact_layout = if model.expanded {
+        None
+    } else {
+        Some(measured_compact_layout(screen_dc, model))
+    };
+    draw_surface(
+        pixels,
+        model.size.width,
+        model.size.height,
+        model,
+        compact_layout.as_ref(),
+    );
+    draw_text_surface(memory_dc, model, compact_layout.as_ref());
     for pixel in pixels.iter_mut() {
         if (*pixel & 0x00ff_ffff) != 0 && (*pixel >> 24) == 0 {
             *pixel |= 0xff00_0000;
@@ -269,11 +572,48 @@ pub fn render_layered_window(_hwnd: u64, _model: &NativeRenderModel) -> bool {
 }
 
 #[cfg(windows)]
-fn draw_surface(pixels: &mut [u32], width: i32, height: i32, model: &NativeRenderModel) {
-    let scale = (width.max(1) as f32 / 480.0).max(1.0);
-    let radius = scaled(20, scale);
-    let border = premultiplied_bgra(242, 184, 75, 220);
-    let background = premultiplied_bgra(28, 25, 22, 245);
+fn draw_surface(
+    pixels: &mut [u32],
+    width: i32,
+    height: i32,
+    model: &NativeRenderModel,
+    compact_layout: Option<&CompactLayout>,
+) {
+    pixels.fill(0);
+    let compact = compact_layout;
+    let design_width = compact.map(|layout| layout.width as f32).unwrap_or(320.0);
+    let scale = width.max(1) as f32 / design_width;
+
+    if model.edge_tab {
+        let tab_width = scaled(60, scale).min(width);
+        let tab_height = scaled(6, scale).min(height).max(1);
+        let tab_left = (width - tab_width) / 2;
+        let tab_top = height - tab_height;
+        fill_rounded(
+            pixels,
+            width,
+            height,
+            tab_left,
+            tab_top,
+            tab_left + tab_width,
+            height,
+            scaled(3, scale),
+            premultiplied_bgra(247, 192, 87, 245),
+        );
+        return;
+    }
+
+    let radius = scaled(if model.expanded { 12 } else { 14 }, scale);
+    let border = if model.expanded {
+        premultiplied_bgra(242, 184, 75, 220)
+    } else {
+        premultiplied_bgra(247, 192, 87, 235)
+    };
+    let background = if model.expanded {
+        premultiplied_bgra(28, 25, 22, 245)
+    } else {
+        premultiplied_bgra(24, 22, 20, 248)
+    };
     fill_rounded(pixels, width, height, 0, 0, width, height, radius, border);
     fill_rounded(
         pixels,
@@ -287,32 +627,16 @@ fn draw_surface(pixels: &mut [u32], width: i32, height: i32, model: &NativeRende
         background,
     );
 
-    let mark_size = scaled(8, scale);
-    let mark_x = scaled(22, scale);
-    let mark_y = if model.expanded {
-        scaled(16, scale)
-    } else {
-        scaled(28, scale)
-    };
-    fill_rect(
-        pixels,
-        width,
-        height,
-        mark_x,
-        mark_y,
-        mark_x + mark_size,
-        mark_y + mark_size,
-        premultiplied_bgra(242, 184, 75, 255),
-    );
-
     if model.expanded {
+        let bar_left = scaled(16, scale);
+        let bar_right = width - scaled(16, scale);
+        let track = premultiplied_bgra(66, 59, 51, 255);
+        let fill = premultiplied_bgra(242, 184, 75, 255);
         for (index, window) in model.windows.iter().enumerate() {
-            let y = scaled(28 + index as i32 * 34, scale);
-            let bar_left = scaled(22, scale);
-            let bar_right = width - scaled(22, scale);
-            let bar_top = y + scaled(28, scale);
-            let bar_bottom = bar_top + scaled(4, scale);
-            fill_rect(
+            let row = expanded_row_layout(model.windows.len(), index);
+            let bar_top = scaled(row.bar_top, scale);
+            let bar_bottom = bar_top + scaled(3, scale).max(1);
+            fill_rounded(
                 pixels,
                 width,
                 height,
@@ -320,11 +644,12 @@ fn draw_surface(pixels: &mut [u32], width: i32, height: i32, model: &NativeRende
                 bar_top,
                 bar_right,
                 bar_bottom,
-                premultiplied_bgra(64, 56, 48, 255),
+                scaled(1, scale),
+                track,
             );
             let filled =
                 bar_left + ((bar_right - bar_left) * i32::from(window.remaining_percent) / 100);
-            fill_rect(
+            fill_rounded(
                 pixels,
                 width,
                 height,
@@ -332,189 +657,453 @@ fn draw_surface(pixels: &mut [u32], width: i32, height: i32, model: &NativeRende
                 bar_top,
                 filled.max(bar_left),
                 bar_bottom,
-                premultiplied_bgra(242, 184, 75, 255),
+                scaled(1, scale),
+                fill,
+            );
+        }
+        let divider = premultiplied_bgra(72, 64, 55, 180);
+        fill_rect(
+            pixels,
+            width,
+            height,
+            scaled(16, scale),
+            scaled(25, scale),
+            width - scaled(16, scale),
+            scaled(26, scale),
+            divider,
+        );
+    }
+
+    if !model.expanded {
+        if let Some(layout) = compact {
+            let dot_size = scaled(3, scale).max(1);
+            let dot_left = scaled(layout.separator_left, scale);
+            let dot_top = (height - dot_size) / 2;
+            fill_rounded(
+                pixels,
+                width,
+                height,
+                dot_left,
+                dot_top,
+                dot_left + dot_size,
+                dot_top + dot_size,
+                (dot_size / 2).max(1),
+                premultiplied_bgra(116, 109, 101, 255),
             );
         }
     }
+
+    draw_chevron(
+        pixels,
+        width,
+        height,
+        compact
+            .map(|layout| scaled(layout.chevron_center_x, scale))
+            .unwrap_or(width - scaled(16, scale)),
+        if model.expanded {
+            scaled(13, scale)
+        } else {
+            height / 2
+        },
+        if model.expanded {
+            scaled(5, scale).max(3)
+        } else {
+            scaled(7, scale).max(4)
+        },
+        model.expanded,
+        if model.expanded {
+            premultiplied_bgra(242, 184, 75, 255)
+        } else {
+            premultiplied_bgra(222, 169, 71, 255)
+        },
+    );
 }
 
 #[cfg(windows)]
-fn draw_text_surface(hdc: windows::Win32::Graphics::Gdi::HDC, model: &NativeRenderModel) {
+fn draw_text_surface(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    model: &NativeRenderModel,
+    compact_layout: Option<&CompactLayout>,
+) {
     use windows::Win32::Foundation::{COLORREF, RECT};
     use windows::Win32::Graphics::Gdi::{
-        CreateFontW, DeleteObject, DrawTextW, SelectObject, SetBkMode, SetTextColor,
-        CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_NOPREFIX,
-        DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL, HGDIOBJ, OUT_DEFAULT_PRECIS,
-        TRANSPARENT,
+        DeleteObject, DrawTextW, SelectObject, SetBkMode, SetTextColor, DT_NOPREFIX, DT_SINGLELINE,
+        DT_VCENTER, FW_BOLD, FW_NORMAL, FW_SEMIBOLD, HGDIOBJ, TRANSPARENT,
     };
 
-    let scale = (model.size.width.max(1) as f32 / 480.0).max(1.0);
-    let title_size = scaled(17, scale);
-    let body_size = scaled(14, scale);
-    let small_size = scaled(11, scale);
+    if model.edge_tab {
+        return;
+    }
+
+    let compact = compact_layout;
+    let design_width = compact.map(|layout| layout.width as f32).unwrap_or(320.0);
+    let scale = model.size.width.max(1) as f32 / design_width;
     let white = rgb(246, 242, 234);
-    let muted = rgb(169, 160, 150);
+    let muted = rgb(138, 132, 125);
     let accent = rgb(242, 184, 75);
+    let lightning = rgb(225, 171, 69);
+    let credit_accent = rgb(216, 168, 74);
+    let secondary = rgb(198, 190, 179);
 
     unsafe {
         let _ = SetBkMode(hdc, TRANSPARENT);
         if model.expanded {
+            let expanded_title_size = scaled(16, scale);
+            let expanded_credit_label_size = scaled(11, scale);
+            let expanded_credit_value_size = scaled(13, scale);
+            let expanded_window_size = scaled(13, scale);
+            let expanded_percentage_size = scaled(18, scale);
+            let expanded_helper_size = scaled(11, scale);
+            let expanded_primary = white;
+            let expanded_percentage = rgb(242, 184, 75);
+            let expanded_credit = rgb(216, 168, 74);
+            let expanded_helper = rgb(184, 176, 165);
+            let expanded_status = rgb(129, 123, 116);
+            let content_left = scaled(16, scale);
+            let content_right = model.size.width - scaled(16, scale);
+
+            draw_text(
+                hdc,
+                "⚡",
+                rect(
+                    scaled(14, scale),
+                    scaled(1, scale),
+                    scaled(36, scale),
+                    scaled(24, scale),
+                ),
+                expanded_title_size,
+                expanded_percentage,
+                FW_SEMIBOLD.0 as i32,
+            );
             draw_text(
                 hdc,
                 &model.title,
                 rect(
-                    scaled(44, scale),
-                    scaled(6, scale),
-                    model.size.width - scaled(160, scale),
-                    scaled(28, scale),
+                    scaled(38, scale),
+                    scaled(3, scale),
+                    scaled(90, scale),
+                    scaled(24, scale),
                 ),
-                title_size,
-                white,
-                true,
+                expanded_title_size,
+                expanded_primary,
+                FW_SEMIBOLD.0 as i32,
             );
-            draw_text(
-                hdc,
-                &model.status_label,
-                rect(
-                    model.size.width - scaled(150, scale),
-                    scaled(8, scale),
-                    model.size.width - scaled(22, scale),
-                    scaled(26, scale),
-                ),
-                small_size,
-                muted,
-                false,
-            );
-            for (index, window) in model.windows.iter().enumerate() {
-                let y = scaled(28 + index as i32 * 34, scale);
+
+            let header_right = model.size.width - scaled(32, scale);
+            if let Some(value) = model.credit_value.as_deref() {
+                let label_width = measure_text_width(
+                    hdc,
+                    "Credits",
+                    expanded_credit_label_size,
+                    FW_NORMAL.0 as i32,
+                );
+                let value_width = measure_text_width(
+                    hdc,
+                    value,
+                    expanded_credit_value_size,
+                    FW_SEMIBOLD.0 as i32,
+                );
+                let stale_width = if matches!(model.credit_status, CreditStatus::Stale) {
+                    measure_text_width(hdc, "Stale", expanded_helper_size, FW_NORMAL.0 as i32)
+                } else {
+                    0
+                };
+                let gap = scaled(4, scale);
+                let stale_gap = if stale_width > 0 { gap } else { 0 };
+                let group_width = label_width + gap + value_width + stale_gap + stale_width;
+                let group_left = (header_right - group_width).max(scaled(100, scale));
+                let label_right = group_left + label_width;
+                let value_left = label_right + gap;
+                let value_right = value_left + value_width;
                 draw_text(
                     hdc,
-                    &window.label,
-                    rect(
-                        scaled(22, scale),
-                        y,
-                        model.size.width - scaled(110, scale),
-                        y + scaled(16, scale),
-                    ),
-                    body_size,
-                    white,
-                    false,
+                    "Credits",
+                    rect(group_left, scaled(4, scale), label_right, scaled(23, scale)),
+                    expanded_credit_label_size,
+                    expanded_helper,
+                    FW_NORMAL.0 as i32,
                 );
                 draw_text(
                     hdc,
-                    &window.percentage,
-                    rect(
-                        model.size.width - scaled(100, scale),
-                        y,
-                        model.size.width - scaled(22, scale),
-                        y + scaled(16, scale),
-                    ),
-                    body_size,
-                    accent,
-                    true,
+                    value,
+                    rect(value_left, scaled(2, scale), value_right, scaled(24, scale)),
+                    expanded_credit_value_size,
+                    expanded_credit,
+                    FW_SEMIBOLD.0 as i32,
                 );
+                if stale_width > 0 {
+                    draw_text(
+                        hdc,
+                        "Stale",
+                        rect(
+                            value_right + stale_gap,
+                            scaled(4, scale),
+                            header_right,
+                            scaled(23, scale),
+                        ),
+                        expanded_helper_size,
+                        expanded_status,
+                        FW_NORMAL.0 as i32,
+                    );
+                }
+            } else {
+                let credit_width = measure_text_width(
+                    hdc,
+                    &model.credit_label,
+                    expanded_credit_label_size,
+                    FW_NORMAL.0 as i32,
+                );
+                let credit_left = (header_right - credit_width).max(scaled(100, scale));
                 draw_text(
                     hdc,
-                    &window.reset,
+                    &model.credit_label,
                     rect(
-                        scaled(22, scale),
-                        y + scaled(15, scale),
-                        model.size.width - scaled(22, scale),
-                        y + scaled(28, scale),
+                        credit_left,
+                        scaled(4, scale),
+                        header_right,
+                        scaled(23, scale),
                     ),
-                    small_size,
-                    muted,
-                    false,
+                    expanded_credit_label_size,
+                    expanded_helper,
+                    FW_NORMAL.0 as i32,
                 );
             }
+
             if model.windows.is_empty() {
+                let row = expanded_row_layout(0, 0);
                 draw_text(
                     hdc,
                     "No allowance window",
                     rect(
-                        scaled(22, scale),
-                        scaled(35, scale),
-                        model.size.width - scaled(22, scale),
-                        scaled(58, scale),
+                        content_left,
+                        scaled(row.top, scale),
+                        content_right,
+                        scaled(row.top + 17, scale),
                     ),
-                    body_size,
-                    muted,
-                    false,
+                    expanded_window_size,
+                    expanded_primary,
+                    FW_SEMIBOLD.0 as i32,
                 );
-            }
-            let credit_color = if matches!(
-                &model.credit_status,
-                CreditStatus::Available | CreditStatus::Unlimited
-            ) {
-                white
+                let status_width = measure_text_width(
+                    hdc,
+                    &model.status_label,
+                    expanded_helper_size,
+                    FW_NORMAL.0 as i32,
+                );
+                draw_text(
+                    hdc,
+                    &model.status_label,
+                    rect(
+                        content_right - status_width,
+                        scaled(row.helper_top, scale),
+                        content_right,
+                        scaled(row.helper_top + 14, scale),
+                    ),
+                    expanded_helper_size,
+                    expanded_status,
+                    FW_NORMAL.0 as i32,
+                );
             } else {
-                muted
+                for (index, window) in model.windows.iter().enumerate() {
+                    let row = expanded_row_layout(model.windows.len(), index);
+                    let percentage_width = measure_text_width(
+                        hdc,
+                        &window.percentage,
+                        expanded_percentage_size,
+                        FW_BOLD.0 as i32,
+                    );
+                    let percentage_left = content_right - percentage_width;
+                    draw_text(
+                        hdc,
+                        &window.label,
+                        rect(
+                            content_left,
+                            scaled(row.top, scale),
+                            percentage_left - scaled(10, scale),
+                            scaled(row.top + 17, scale),
+                        ),
+                        expanded_window_size,
+                        expanded_primary,
+                        FW_SEMIBOLD.0 as i32,
+                    );
+                    draw_text(
+                        hdc,
+                        &window.percentage,
+                        rect(
+                            percentage_left,
+                            scaled(row.top - 1, scale),
+                            content_right,
+                            scaled(row.top + 19, scale),
+                        ),
+                        expanded_percentage_size,
+                        expanded_percentage,
+                        FW_BOLD.0 as i32,
+                    );
+                    draw_text(
+                        hdc,
+                        &window.reset,
+                        rect(
+                            content_left,
+                            scaled(row.helper_top, scale),
+                            content_right,
+                            scaled(row.helper_top + 14, scale),
+                        ),
+                        expanded_helper_size,
+                        expanded_helper,
+                        FW_NORMAL.0 as i32,
+                    );
+                    let status_width = measure_text_width(
+                        hdc,
+                        &model.status_label,
+                        expanded_helper_size,
+                        FW_NORMAL.0 as i32,
+                    );
+                    draw_text(
+                        hdc,
+                        &model.status_label,
+                        rect(
+                            content_right - status_width,
+                            scaled(row.helper_top, scale),
+                            content_right,
+                            scaled(row.helper_top + 14, scale),
+                        ),
+                        expanded_helper_size,
+                        expanded_status,
+                        FW_NORMAL.0 as i32,
+                    );
+                }
+            }
+        } else {
+            let collapsed_lightning_size = scaled(16, scale);
+            let collapsed_title_size = scaled(16, scale);
+            let collapsed_percentage_size = scaled(19, scale);
+            let collapsed_credit_label_size = scaled(11, scale);
+            let collapsed_credit_value_size = scaled(19, scale);
+            let collapsed_status_size = scaled(11, scale);
+            let layout = compact.expect("compact layout is available for collapsed rendering");
+            let optical_shift = scale.round().max(1.0) as i32;
+            let compact_text_rect = |left: i32, right: i32, shift: i32| {
+                rect(left, shift, right, model.size.height + shift)
             };
             draw_text(
                 hdc,
-                &model.credit_label,
-                rect(
-                    scaled(22, scale),
-                    model.size.height - scaled(18, scale),
-                    model.size.width - scaled(22, scale),
-                    model.size.height - scaled(3, scale),
+                "⚡",
+                compact_text_rect(
+                    scaled(layout.icon_left, scale),
+                    scaled(layout.icon_right, scale),
+                    -optical_shift,
                 ),
-                small_size,
-                credit_color,
-                true,
+                collapsed_lightning_size,
+                lightning,
+                FW_SEMIBOLD.0 as i32,
             );
-        } else {
             draw_text(
                 hdc,
                 &model.title,
-                rect(scaled(44, scale), 0, scaled(110, scale), model.size.height),
-                title_size,
+                compact_text_rect(
+                    scaled(layout.title_left, scale),
+                    scaled(layout.title_right, scale),
+                    0,
+                ),
+                collapsed_title_size,
                 white,
-                true,
+                FW_SEMIBOLD.0 as i32,
             );
             draw_text(
                 hdc,
                 &model.primary_percentage,
-                rect(scaled(118, scale), 0, scaled(170, scale), model.size.height),
-                title_size,
+                compact_text_rect(
+                    scaled(layout.percentage_left, scale),
+                    scaled(layout.percentage_right, scale),
+                    optical_shift,
+                ),
+                collapsed_percentage_size,
                 accent,
-                true,
+                FW_BOLD.0 as i32,
+            );
+            if let Some(value) = model.credit_value.as_deref() {
+                let label_right = layout.credit_label_right;
+                let value_left = layout
+                    .credit_value_left
+                    .expect("measured credit value left bound");
+                let value_right = layout
+                    .credit_value_right
+                    .expect("measured credit value right bound");
+                draw_text(
+                    hdc,
+                    "Credits",
+                    compact_text_rect(
+                        scaled(layout.credit_left, scale),
+                        scaled(label_right, scale),
+                        0,
+                    ),
+                    collapsed_credit_label_size,
+                    secondary,
+                    FW_NORMAL.0 as i32,
+                );
+                draw_text(
+                    hdc,
+                    value,
+                    compact_text_rect(
+                        scaled(value_left, scale),
+                        scaled(value_right + COMPACT_CREDIT_VALUE_RIGHT_PADDING, scale),
+                        0,
+                    ),
+                    collapsed_credit_value_size,
+                    credit_accent,
+                    FW_BOLD.0 as i32,
+                );
+                if matches!(model.credit_status, CreditStatus::Stale) {
+                    draw_text(
+                        hdc,
+                        "· Stale",
+                        compact_text_rect(
+                            scaled(value_right + 3, scale),
+                            scaled(layout.credit_right, scale),
+                            0,
+                        ),
+                        collapsed_credit_label_size,
+                        muted,
+                        FW_NORMAL.0 as i32,
+                    );
+                }
+            } else {
+                draw_text(
+                    hdc,
+                    &model.credit_label,
+                    compact_text_rect(
+                        scaled(layout.credit_left, scale),
+                        scaled(layout.credit_right, scale),
+                        0,
+                    ),
+                    collapsed_credit_label_size,
+                    secondary,
+                    FW_NORMAL.0 as i32,
+                );
+            }
+            draw_text(
+                hdc,
+                "·",
+                compact_text_rect(
+                    scaled(layout.separator_left, scale),
+                    scaled(layout.separator_right, scale),
+                    0,
+                ),
+                collapsed_status_size,
+                rgb(116, 109, 101),
+                FW_NORMAL.0 as i32,
             );
             draw_text(
                 hdc,
                 &model.status_label,
-                rect(scaled(178, scale), 0, scaled(224, scale), model.size.height),
-                small_size,
-                muted,
-                false,
-            );
-            draw_text(
-                hdc,
-                "·",
-                rect(scaled(226, scale), 0, scaled(236, scale), model.size.height),
-                small_size,
-                muted,
-                false,
-            );
-            draw_text(
-                hdc,
-                &model.credit_label,
-                rect(
-                    scaled(238, scale),
+                compact_text_rect(
+                    scaled(layout.status_left, scale),
+                    scaled(layout.status_right, scale),
                     0,
-                    model.size.width - scaled(20, scale),
-                    model.size.height,
                 ),
-                small_size,
-                if matches!(
-                    &model.credit_status,
-                    CreditStatus::Available | CreditStatus::Unlimited
-                ) {
-                    white
-                } else {
-                    muted
-                },
-                true,
+                collapsed_status_size,
+                muted,
+                FW_NORMAL.0 as i32,
             );
         }
     }
@@ -525,30 +1114,20 @@ fn draw_text_surface(hdc: windows::Win32::Graphics::Gdi::HDC, model: &NativeRend
         mut bounds: RECT,
         size: i32,
         color: COLORREF,
-        bold: bool,
+        weight: i32,
     ) {
+        let value = if value == "\u{8def}" {
+            return;
+        } else if value.chars().any(|character| character == '\u{923f}') {
+            "\u{26a1}"
+        } else if value.starts_with('\u{8def}') && value.ends_with(" Stale") {
+            "\u{00b7} Stale"
+        } else {
+            value
+        };
         let mut text: Vec<u16> = value.encode_utf16().collect();
         unsafe {
-            let font = CreateFontW(
-                -size,
-                0,
-                0,
-                0,
-                if bold {
-                    FW_BOLD.0 as i32
-                } else {
-                    FW_NORMAL.0 as i32
-                },
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY,
-                DEFAULT_PITCH.0 as u32 | FF_DONTCARE.0 as u32,
-                windows::core::w!("Segoe UI"),
-            );
+            let font = create_segoe_font(size, weight);
             let previous = SelectObject(hdc, HGDIOBJ(font.0));
             let _ = SetTextColor(hdc, color);
             let _ = DrawTextW(
@@ -578,7 +1157,40 @@ fn draw_text_surface(hdc: windows::Win32::Graphics::Gdi::HDC, model: &NativeRend
 
 #[cfg(windows)]
 fn scaled(value: i32, scale: f32) -> i32 {
-    ((value as f32 * scale).round() as i32).max(1)
+    ((value as f32 * scale).round() as i32).max(0)
+}
+
+#[cfg(windows)]
+fn draw_chevron(
+    pixels: &mut [u32],
+    width: i32,
+    height: i32,
+    center_x: i32,
+    center_y: i32,
+    half_width: i32,
+    up: bool,
+    color: u32,
+) {
+    for offset in 0..=half_width {
+        let y = if up {
+            center_y + half_width - offset
+        } else {
+            center_y - half_width + offset
+        };
+        let left_x = center_x - half_width + offset;
+        let right_x = center_x + half_width - offset;
+        for thickness in 0..2 {
+            set_pixel(pixels, width, height, left_x, y + thickness, color);
+            set_pixel(pixels, width, height, right_x, y + thickness, color);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn set_pixel(pixels: &mut [u32], width: i32, height: i32, x: i32, y: i32, color: u32) {
+    if x >= 0 && x < width && y >= 0 && y < height {
+        pixels[y as usize * width as usize + x as usize] = color;
+    }
 }
 
 #[cfg(windows)]
@@ -661,7 +1273,10 @@ fn premultiplied_bgra(red: u32, green: u32, blue: u32, alpha: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_render_model, format_credit_balance};
+    use super::{
+        build_render_model, compact_width_for_snapshot, expanded_height_for_window_count,
+        expanded_row_layout, format_credit_balance,
+    };
     use crate::engine::{CreditSnapshot, CreditStatus, RuntimeStatus, UsageSnapshot, UsageWindow};
     use crate::window_geometry::WindowSize;
 
@@ -708,12 +1323,95 @@ mod tests {
             &credits(CreditStatus::Unavailable, None),
             false,
             WindowSize {
-                width: 480,
-                height: 64,
+                width: 380,
+                height: 48,
             },
         );
         assert_eq!(model.primary_percentage, "42%");
         assert_eq!(model.status_label, "Partial");
+    }
+
+    #[test]
+    fn compact_width_is_content_driven_and_tighter_than_legacy_width() {
+        let width = compact_width_for_snapshot(
+            &snapshot(RuntimeStatus::Partial, vec![window(10080, 0)]),
+            &credits(CreditStatus::Available, Some("774.86")),
+        );
+
+        assert!(width >= 240);
+        assert!(width < 380);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn measured_compact_layout_keeps_dynamic_content_non_overlapping() {
+        use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+
+        let hdc = unsafe { GetDC(None) };
+        assert!(!hdc.is_invalid());
+        let cases = vec![
+            (
+                snapshot(RuntimeStatus::Partial, vec![window(10080, 0)]),
+                credits(CreditStatus::Available, Some("741.74")),
+            ),
+            (
+                snapshot(RuntimeStatus::Partial, vec![window(10080, 100)]),
+                credits(CreditStatus::Available, Some("123456789012345.67")),
+            ),
+            (
+                snapshot(RuntimeStatus::Unavailable, Vec::new()),
+                credits(CreditStatus::Unavailable, None),
+            ),
+            (
+                snapshot(RuntimeStatus::Fresh, vec![window(10080, 42)]),
+                credits(CreditStatus::Available, Some("741.74")),
+            ),
+            (
+                snapshot(RuntimeStatus::Partial, vec![window(10080, 42)]),
+                credits(CreditStatus::Stale, Some("841.5000")),
+            ),
+        ];
+
+        for (usage, credit_snapshot) in cases {
+            let model = build_render_model(
+                &usage,
+                &credit_snapshot,
+                false,
+                WindowSize {
+                    width: 1,
+                    height: 40,
+                },
+            );
+            let layout = super::measured_compact_layout(hdc, &model);
+
+            assert_eq!(layout.percentage_left - layout.title_right, 8);
+            assert_eq!(layout.credit_left - layout.percentage_right, 8);
+            assert_eq!(layout.separator_left - layout.credit_right, 5);
+            assert_eq!(layout.separator_right - layout.separator_left, 3);
+            assert_eq!(layout.status_left - layout.separator_right, 5);
+            assert_eq!(layout.chevron_center_x - layout.status_right, 17);
+            assert_eq!(layout.width - layout.chevron_center_x, 18);
+            assert!(layout.title_left < layout.title_right);
+            assert!(layout.title_right <= layout.percentage_left);
+            assert!(layout.percentage_left < layout.percentage_right);
+            assert!(layout.percentage_right <= layout.credit_left);
+            assert!(layout.credit_left < layout.credit_right);
+            assert!(layout.status_left < layout.status_right);
+            assert!(layout.status_right < layout.width);
+
+            if let (Some(value_left), Some(value_right)) =
+                (layout.credit_value_left, layout.credit_value_right)
+            {
+                assert_eq!(value_left - layout.credit_label_right, 3);
+                assert!(layout.credit_label_right <= value_left);
+                assert!(value_left < value_right);
+                assert!(value_right <= layout.credit_right);
+            }
+        }
+
+        unsafe {
+            let _ = ReleaseDC(None, hdc);
+        }
     }
 
     #[test]
@@ -723,8 +1421,8 @@ mod tests {
             &credits(CreditStatus::Unavailable, None),
             false,
             WindowSize {
-                width: 480,
-                height: 64,
+                width: 380,
+                height: 48,
             },
         );
         assert_eq!(model.primary_percentage, "--");
@@ -741,13 +1439,36 @@ mod tests {
             &credits(CreditStatus::Unavailable, None),
             true,
             WindowSize {
-                width: 500,
-                height: 112,
+                width: 320,
+                height: 92,
             },
         );
         assert_eq!(model.windows.len(), 2);
         assert_eq!(model.windows[0].label, "5h");
         assert_eq!(model.windows[1].label, "1 week");
+        assert_eq!(model.title, "Codex");
+        assert_eq!(model.windows[0].percentage, "80%");
+        assert_eq!(model.windows[1].percentage, "42%");
+    }
+
+    #[test]
+    fn expanded_height_grows_only_for_additional_allowance_rows() {
+        assert_eq!(expanded_height_for_window_count(0), 80);
+        assert_eq!(expanded_height_for_window_count(1), 80);
+        assert_eq!(expanded_height_for_window_count(2), 115);
+        assert_eq!(expanded_height_for_window_count(3), 157);
+    }
+
+    #[test]
+    fn expanded_rows_have_separate_vertical_regions() {
+        let first = expanded_row_layout(2, 0);
+        let second = expanded_row_layout(2, 1);
+
+        assert_eq!(first.top, 29);
+        assert_eq!(first.helper_top, 44);
+        assert_eq!(first.bar_top, 61);
+        assert!(first.bar_top + 3 < second.top);
+        assert_eq!(second.top, 71);
     }
 
     #[test]
@@ -757,8 +1478,8 @@ mod tests {
             &credits(CreditStatus::Unavailable, None),
             false,
             WindowSize {
-                width: 480,
-                height: 64,
+                width: 380,
+                height: 48,
             },
         );
         assert_eq!(model.primary_percentage, "0%");
@@ -772,11 +1493,12 @@ mod tests {
             &credits(CreditStatus::Available, Some("827.9644120000")),
             false,
             WindowSize {
-                width: 480,
-                height: 64,
+                width: 380,
+                height: 48,
             },
         );
         assert_eq!(model.credit_label, "Credits 827.96");
+        assert_eq!(model.credit_value.as_deref(), Some("827.96"));
     }
 
     #[test]
@@ -786,16 +1508,16 @@ mod tests {
             &credits(CreditStatus::Available, Some("841.5000")),
             true,
             WindowSize {
-                width: 500,
-                height: 112,
+                width: 320,
+                height: 92,
             },
         );
         assert_eq!(model.credit_label, "Credits 841.5");
         assert_eq!(
             model.size,
             WindowSize {
-                width: 500,
-                height: 112
+                width: 320,
+                height: 92
             }
         );
     }
@@ -807,8 +1529,8 @@ mod tests {
             &credits(CreditStatus::Unlimited, None),
             false,
             WindowSize {
-                width: 480,
-                height: 64,
+                width: 380,
+                height: 48,
             },
         );
         assert_eq!(model.credit_label, "Credits ∞");
@@ -822,8 +1544,8 @@ mod tests {
                 &credits(status, None),
                 false,
                 WindowSize {
-                    width: 480,
-                    height: 64,
+                    width: 380,
+                    height: 48,
                 },
             );
             assert!(model.credit_label.contains("Credits —"));
@@ -838,11 +1560,12 @@ mod tests {
             &credits(CreditStatus::Stale, Some("841")),
             true,
             WindowSize {
-                width: 500,
-                height: 112,
+                width: 320,
+                height: 92,
             },
         );
         assert_eq!(model.credit_label, "Credits 841 · Stale");
+        assert_eq!(model.credit_value.as_deref(), Some("841"));
         assert_eq!(model.status, RuntimeStatus::Partial);
         assert_eq!(model.credit_status, CreditStatus::Stale);
     }
@@ -854,8 +1577,8 @@ mod tests {
             &credits(CreditStatus::Available, Some("841")),
             false,
             WindowSize {
-                width: 480,
-                height: 64,
+                width: 380,
+                height: 48,
             },
         );
         assert_eq!(model.credit_label, "Credits 841");
