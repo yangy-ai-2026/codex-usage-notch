@@ -15,6 +15,8 @@ use crate::native_renderer::{
     render_layered_window, NativeRenderModel,
 };
 
+use crate::settings::{AppSettings, Theme};
+
 #[cfg(windows)]
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 
@@ -29,9 +31,6 @@ static TRACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 static MOVE_SIZE_ACTIVE: AtomicBool = AtomicBool::new(false);
-
-#[cfg(windows)]
-static CODEX_FOREGROUND_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 static ATTACHED_TARGET: AtomicIsize = AtomicIsize::new(0);
@@ -201,7 +200,7 @@ fn overlay_thread() -> &'static Mutex<Option<std::thread::JoinHandle<()>>> {
 }
 
 #[cfg(windows)]
-pub fn start() {
+pub fn start(settings: AppSettings) {
     let mut thread = overlay_thread()
         .lock()
         .expect("native overlay thread state is poisoned");
@@ -212,18 +211,17 @@ pub fn start() {
     TRACKER_STOP.store(false, Ordering::Release);
     TRACKER_DIRTY.store(true, Ordering::Release);
     MOVE_SIZE_ACTIVE.store(false, Ordering::Release);
-    CODEX_FOREGROUND_ACTIVE.store(false, Ordering::Release);
     DETAILS_EXPANDED.store(false, Ordering::Release);
     *thread = Some(
         std::thread::Builder::new()
             .name("codex-notch-native-overlay".to_string())
-            .spawn(run)
+            .spawn(move || run(settings))
             .expect("failed to start Codex Notch native overlay thread"),
     );
 }
 
 #[cfg(not(windows))]
-pub fn start() {}
+pub fn start(_settings: AppSettings) {}
 
 #[cfg(windows)]
 pub fn initialize_dpi_awareness() {
@@ -256,7 +254,6 @@ pub fn stop() {
     TRACKER_STOP.store(true, Ordering::Release);
     TRACKER_DIRTY.store(true, Ordering::Release);
     MOVE_SIZE_ACTIVE.store(false, Ordering::Release);
-    CODEX_FOREGROUND_ACTIVE.store(false, Ordering::Release);
     DETAILS_EXPANDED.store(false, Ordering::Release);
     clear_chevron_hit_region();
     reset_chevron_interaction();
@@ -288,7 +285,7 @@ struct NativeWindow {
 }
 
 #[cfg(windows)]
-fn run() {
+fn run(settings: AppSettings) {
     use windows::Win32::Foundation::HINSTANCE;
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -315,12 +312,15 @@ fn run() {
     let (runtime_sender, runtime_receiver) = std::sync::mpsc::channel();
     let usage_worker = spawn_usage_worker(runtime_sender);
     let hooks = message_hooks();
+    let theme = settings.theme;
 
     message_loop(
         window.hwnd,
         &mut discovery,
         &mut attached_target,
         &runtime_receiver,
+        &settings,
+        theme,
     );
     let _ = usage_worker.join();
 
@@ -461,6 +461,8 @@ fn message_loop(
     discovery: &mut WindowDiscovery,
     attached_target: &mut Option<u64>,
     runtime_receiver: &std::sync::mpsc::Receiver<NativeRuntimeSnapshot>,
+    settings: &AppSettings,
+    theme: Theme,
 ) {
     use std::time::{Duration, Instant};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -474,7 +476,11 @@ fn message_loop(
     let mut transition_from = 0.0;
     let mut transition_progress = transition_from;
     let mut transition_started = Instant::now();
-    let mut reveal_target = 0.0;
+    let mut reveal_target = if settings.hover_expansion_enabled {
+        0.0
+    } else {
+        1.0
+    };
     let mut reveal_from = reveal_target;
     let mut reveal_progress = reveal_target;
     let mut reveal_started = Instant::now();
@@ -489,6 +495,8 @@ fn message_loop(
         transition_target,
         transition_progress,
         reveal_progress,
+        settings,
+        theme,
     );
     let mut last_sync = Instant::now();
     while !TRACKER_STOP.load(Ordering::Acquire) {
@@ -557,14 +565,15 @@ fn message_loop(
         } else {
             !matches!(hover.state, HoverState::Collapsed)
         };
-        let next_reveal_target =
-            if transition_target || transition_progress > f32::EPSILON || reveal_engaged {
-                1.0
-            } else if activation_inside {
-                1.0
-            } else {
-                0.0
-            };
+        let next_reveal_target = if !settings.hover_expansion_enabled {
+            1.0
+        } else if transition_target || transition_progress > f32::EPSILON || reveal_engaged {
+            1.0
+        } else if activation_inside {
+            1.0
+        } else {
+            0.0
+        };
         if (next_reveal_target - reveal_target).abs() > f32::EPSILON {
             reveal_target = next_reveal_target;
             reveal_from = reveal_progress;
@@ -593,6 +602,8 @@ fn message_loop(
                 transition_target,
                 transition_progress,
                 reveal_progress,
+                settings,
+                theme,
             );
             let target_changed = previous_target.is_some() && previous_target != *attached_target;
             if (target_changed || last_placement.is_none()) && hover.reset_collapsed() {
@@ -602,16 +613,7 @@ fn message_loop(
             last_sync = Instant::now();
         }
 
-        if event_dirty
-            && CODEX_FOREGROUND_ACTIVE.load(Ordering::Acquire)
-            && last_placement.is_some()
-        {
-            unsafe {
-                let _ = reassert_overlay_z_order(overlay);
-            }
-        }
-
-        if !move_size_active {
+        if settings.hover_expansion_enabled && !move_size_active {
             if last_placement.is_some() {
                 let inside = cursor_in_activation_area(hover_zone);
                 if let Some(expanded) = hover.update(inside, Instant::now()) {
@@ -624,6 +626,9 @@ fn message_loop(
                 DETAILS_EXPANDED.store(false, Ordering::Release);
                 TRACKER_DIRTY.store(true, Ordering::Release);
             }
+        } else if last_placement.is_none() && hover.reset_collapsed() {
+            DETAILS_EXPANDED.store(false, Ordering::Release);
+            TRACKER_DIRTY.store(true, Ordering::Release);
         }
 
         std::thread::sleep(Duration::from_millis(
@@ -803,14 +808,11 @@ unsafe extern "system" fn win_event_callback(
     _event_time: u32,
 ) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART,
+        EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART,
     };
 
     let attached_target = ATTACHED_TARGET.load(Ordering::Acquire);
     let is_attached_target = attached_target != 0 && hwnd.0 as isize == attached_target;
-    if event == EVENT_SYSTEM_FOREGROUND {
-        CODEX_FOREGROUND_ACTIVE.store(is_attached_target, Ordering::Release);
-    }
     if is_attached_target {
         if event == EVENT_SYSTEM_MOVESIZESTART {
             MOVE_SIZE_ACTIVE.store(true, Ordering::Release);
@@ -884,11 +886,13 @@ fn sync_overlay(
     expanded: bool,
     transition_progress: f32,
     reveal_progress: f32,
+    settings: &AppSettings,
+    theme: Theme,
 ) -> Option<NotchPlacement> {
     use std::ffi::c_void;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, IsIconic, IsWindow, IsWindowVisible,
+        GetAncestor, GetForegroundWindow, IsIconic, IsWindow, IsWindowVisible, GA_ROOTOWNER,
     };
 
     *hover_zone = None;
@@ -926,8 +930,15 @@ fn sync_overlay(
             return None;
         }
     }
-    let codex_foreground = unsafe { GetForegroundWindow().0 == target_hwnd.0 };
-    CODEX_FOREGROUND_ACTIVE.store(codex_foreground, Ordering::Release);
+    let foreground_snapshot = {
+        let mut foreground_discovery = WindowDiscovery::default();
+        foreground_discovery.refresh().ok()
+    };
+    let foreground_hwnd = unsafe { GetAncestor(GetForegroundWindow(), GA_ROOTOWNER) };
+    let codex_foreground = foreground_snapshot
+        .and_then(|snapshot| snapshot.target)
+        .is_some_and(|candidate| candidate.hwnd == foreground_hwnd.0 as usize as u64);
+    // v0.1 is foreground-only; the persisted auto-hide=false policy is deferred to v0.2.
     if !codex_foreground {
         hide_overlay(overlay);
         return None;
@@ -952,7 +963,13 @@ fn sync_overlay(
         },
         geometry.dpi,
     );
-    let anchor = codex_top_center_anchor(geometry.frame_bounds, geometry.work_area, collapsed_size);
+    let anchor = apply_position_offset(
+        codex_top_center_anchor(geometry.frame_bounds, geometry.work_area, collapsed_size),
+        settings,
+        geometry.dpi,
+        geometry.work_area,
+        expanded_size.height,
+    );
     let notch_size = interpolate_size(collapsed_size, expanded_size, transition_progress);
     let normal_placement = anchored_placement(
         anchor,
@@ -980,6 +997,7 @@ fn sync_overlay(
         partially_hidden_placement(normal_placement, reveal_progress)
     };
     let mut model = build_render_model(&snapshot.usage, &snapshot.credits, expanded, notch_size);
+    model.theme = theme;
     model.edge_tab = edge_tab;
     let render_ready = if rendered_model.as_ref() == Some(&model) {
         true
@@ -995,8 +1013,9 @@ fn sync_overlay(
         return None;
     }
 
+    let target_changed = *attached_target != Some(target.hwnd);
     let positioned = unsafe {
-        if *attached_target != Some(target.hwnd) {
+        if target_changed {
             *attached_target = Some(target.hwnd);
             ATTACHED_TARGET.store(target_hwnd.0 as isize, Ordering::Release);
         }
@@ -1019,7 +1038,6 @@ fn sync_overlay(
     }
 }
 
-#[cfg(windows)]
 fn codex_top_center_anchor(
     target_frame: Rect,
     work_area: Rect,
@@ -1038,6 +1056,52 @@ fn codex_top_center_anchor(
         outside_target_frame: false,
         bounds,
     }
+}
+
+#[cfg(windows)]
+fn apply_position_offset(
+    anchor: NotchPlacement,
+    settings: &AppSettings,
+    dpi: crate::window_geometry::WindowDpi,
+    work_area: Rect,
+    max_height: i32,
+) -> NotchPlacement {
+    let width = anchor.bounds.width().clamp(1, work_area.width().max(1));
+    let height = max_height.clamp(1, work_area.height().max(1));
+    let max_left = (work_area.right - width).max(work_area.left);
+    let max_top = (work_area.bottom - height).max(work_area.top);
+    let left = offset_coordinate(
+        anchor.bounds.left,
+        scale_logical_offset(settings.position_x_offset, dpi.x),
+        work_area.left,
+        max_left,
+    );
+    let top = offset_coordinate(
+        anchor.bounds.top,
+        scale_logical_offset(settings.position_y_offset, dpi.y),
+        work_area.top,
+        max_top,
+    );
+    NotchPlacement {
+        bounds: Rect::new(left, top, left + width, top + anchor.bounds.height()),
+        outside_target_frame: anchor.outside_target_frame,
+    }
+}
+
+#[cfg(windows)]
+fn scale_logical_offset(value: i32, dpi: u32) -> i32 {
+    let numerator = i64::from(value) * i64::from(dpi.max(1));
+    let rounded = if numerator >= 0 {
+        (numerator + 48) / 96
+    } else {
+        (numerator - 48) / 96
+    };
+    rounded.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+#[cfg(windows)]
+fn offset_coordinate(value: i32, offset: i32, minimum: i32, maximum: i32) -> i32 {
+    (i64::from(value) + i64::from(offset)).clamp(i64::from(minimum), i64::from(maximum)) as i32
 }
 
 #[cfg(windows)]
@@ -1110,12 +1174,12 @@ unsafe fn show_overlay(
     placement: &NotchPlacement,
 ) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{
-        SetWindowPos, ShowWindow, HWND_TOP, SWP_NOACTIVATE, SW_SHOWNOACTIVATE,
+        SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SW_SHOWNOACTIVATE,
     };
 
     if SetWindowPos(
         overlay,
-        Some(HWND_TOP),
+        Some(HWND_TOPMOST),
         placement.bounds.left,
         placement.bounds.top,
         placement.bounds.width(),
@@ -1135,11 +1199,11 @@ unsafe fn position_overlay(
     overlay: windows::Win32::Foundation::HWND,
     placement: &NotchPlacement,
 ) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOACTIVATE};
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE};
 
     SetWindowPos(
         overlay,
-        Some(HWND_TOP),
+        Some(HWND_TOPMOST),
         placement.bounds.left,
         placement.bounds.top,
         placement.bounds.width(),
@@ -1150,27 +1214,21 @@ unsafe fn position_overlay(
 }
 
 #[cfg(windows)]
-unsafe fn reassert_overlay_z_order(overlay: windows::Win32::Foundation::HWND) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    };
-
-    SetWindowPos(
-        overlay,
-        Some(HWND_TOP),
-        0,
-        0,
-        0,
-        0,
-        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-    )
-    .is_ok()
-}
-
-#[cfg(windows)]
 fn hide_overlay(overlay: windows::Win32::Foundation::HWND) {
     unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, ShowWindow, HWND_NOTOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SW_HIDE,
+        };
+        let _ = SetWindowPos(
+            overlay,
+            Some(HWND_NOTOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        );
         let _ = ShowWindow(overlay, SW_HIDE);
     }
 }
@@ -1195,13 +1253,14 @@ fn hide_overlay_and_clear_target(
 #[cfg(all(test, windows))]
 mod tests {
     use super::{
-        anchored_placement, chevron_hit_rect, codex_top_center_anchor, interpolate_size,
-        partially_hidden_placement, transition_value, HoverController, HoverState,
-        NativeRuntimeSnapshot, HIDDEN_VISIBLE_HEIGHT, HOVER_COLLAPSE_DELAY_MS,
+        anchored_placement, apply_position_offset, chevron_hit_rect, codex_top_center_anchor,
+        interpolate_size, partially_hidden_placement, transition_value, HoverController,
+        HoverState, NativeRuntimeSnapshot, HIDDEN_VISIBLE_HEIGHT, HOVER_COLLAPSE_DELAY_MS,
         HOVER_EXPAND_DELAY_MS, REVEAL_DURATION_MS, TRANSITION_DURATION_MS,
     };
     use crate::engine::{CreditSnapshot, CreditStatus, RuntimeStatus, UsageSnapshot};
-    use crate::window_geometry::{NotchPlacement, Rect, WindowSize};
+    use crate::settings::AppSettings;
+    use crate::window_geometry::{NotchPlacement, Rect, WindowDpi, WindowSize};
     use std::time::{Duration, Instant};
 
     fn runtime_snapshot(status: CreditStatus, balance: Option<&str>) -> NativeRuntimeSnapshot {
@@ -1312,6 +1371,37 @@ mod tests {
         );
 
         assert_eq!(anchor.bounds, Rect::new(610, 300, 990, 340));
+    }
+
+    #[test]
+    fn position_offsets_are_dpi_aware_and_clamped_to_work_area() {
+        let anchor = NotchPlacement {
+            bounds: Rect::new(770, 100, 1150, 140),
+            outside_target_frame: false,
+        };
+        let mut settings = AppSettings::default();
+        settings.position_x_offset = 10;
+        settings.position_y_offset = 10;
+
+        let shifted = apply_position_offset(
+            anchor,
+            &settings,
+            WindowDpi { x: 144, y: 144 },
+            Rect::new(0, 0, 1920, 1080),
+            92,
+        );
+        assert_eq!(shifted.bounds, Rect::new(785, 115, 1165, 155));
+
+        settings.position_x_offset = i32::MAX;
+        settings.position_y_offset = i32::MIN;
+        let clamped = apply_position_offset(
+            anchor,
+            &settings,
+            WindowDpi { x: 144, y: 144 },
+            Rect::new(0, 0, 1920, 1080),
+            92,
+        );
+        assert_eq!(clamped.bounds, Rect::new(1540, 0, 1920, 40));
     }
 
     #[test]

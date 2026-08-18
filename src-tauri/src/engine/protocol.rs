@@ -6,6 +6,12 @@ use std::thread;
 use std::time::Duration;
 use thiserror::Error;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Debug, Error)]
 pub enum ProtocolError {
     #[error("Codex CLI was not found on PATH")]
@@ -58,12 +64,13 @@ pub fn discover_binary() -> Result<String, ProtocolError> {
         .into_iter()
         .filter(|candidate| Path::new(candidate).exists())
         .find(|candidate| {
-            Command::new(candidate)
+            let mut command = Command::new(candidate);
+            command
                 .arg("--version")
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
+                .stderr(Stdio::null());
+            configure_no_console(&mut command);
+            command.status().is_ok_and(|status| status.success())
         })
         .ok_or(ProtocolError::BinaryNotFound)
 }
@@ -72,16 +79,15 @@ pub fn read_rate_limits(
     binary: &str,
     timeout: Duration,
 ) -> Result<serde_json::Value, ProtocolError> {
-    let mut child = ChildGuard::new(
-        Command::new(binary)
-            .args(["app-server", "--stdio"])
-            .current_dir(std::env::temp_dir())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(ProtocolError::Spawn)?,
-    );
+    let mut command = Command::new(binary);
+    command
+        .args(["app-server", "--stdio"])
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    configure_no_console(&mut command);
+    let mut child = ChildGuard::new(command.spawn().map_err(ProtocolError::Spawn)?);
     let mut stdin = child
         .child
         .stdin
@@ -140,6 +146,11 @@ pub fn read_rate_limits(
             return Ok(value);
         }
     }
+}
+
+fn configure_no_console(command: &mut Command) {
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
 }
 
 fn next_json(

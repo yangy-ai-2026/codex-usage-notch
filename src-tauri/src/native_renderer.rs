@@ -1,4 +1,5 @@
 use crate::engine::{CreditSnapshot, CreditStatus, RuntimeStatus, UsageSnapshot};
+use crate::settings::Theme;
 use crate::window_geometry::WindowSize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +14,7 @@ pub struct NativeRenderWindow {
 pub struct NativeRenderModel {
     pub status: RuntimeStatus,
     pub credit_status: CreditStatus,
+    pub theme: Theme,
     pub expanded: bool,
     pub edge_tab: bool,
     pub size: WindowSize,
@@ -52,6 +54,80 @@ struct ExpandedRowLayout {
     top: i32,
     helper_top: i32,
     bar_top: i32,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ThemePalette {
+    edge_tab: [u8; 4],
+    expanded_border: [u8; 4],
+    compact_border: [u8; 4],
+    expanded_background: [u8; 4],
+    compact_background: [u8; 4],
+    progress_track: [u8; 4],
+    progress_fill: [u8; 4],
+    divider: [u8; 4],
+    compact_dot: [u8; 4],
+    expanded_chevron: [u8; 4],
+    compact_chevron: [u8; 4],
+    primary: [u8; 3],
+    muted: [u8; 3],
+    accent: [u8; 3],
+    lightning: [u8; 3],
+    credit: [u8; 3],
+    secondary: [u8; 3],
+    expanded_helper: [u8; 3],
+    expanded_status: [u8; 3],
+}
+
+#[cfg(windows)]
+impl ThemePalette {
+    fn for_theme(theme: Theme) -> Self {
+        match theme {
+            Theme::Light => Self {
+                edge_tab: [196, 137, 42, 245],
+                expanded_border: [198, 140, 48, 220],
+                compact_border: [211, 153, 54, 235],
+                expanded_background: [248, 246, 240, 245],
+                compact_background: [252, 250, 245, 248],
+                progress_track: [220, 214, 202, 255],
+                progress_fill: [205, 143, 43, 255],
+                divider: [218, 211, 198, 180],
+                compact_dot: [145, 136, 120, 255],
+                expanded_chevron: [193, 132, 37, 255],
+                compact_chevron: [181, 124, 38, 255],
+                primary: [47, 43, 38],
+                muted: [105, 98, 88],
+                accent: [193, 132, 37],
+                lightning: [186, 123, 31],
+                credit: [171, 116, 28],
+                secondary: [120, 112, 100],
+                expanded_helper: [111, 103, 92],
+                expanded_status: [147, 139, 127],
+            },
+            Theme::Dark | Theme::System => Self {
+                edge_tab: [247, 192, 87, 245],
+                expanded_border: [242, 184, 75, 220],
+                compact_border: [247, 192, 87, 235],
+                expanded_background: [28, 25, 22, 245],
+                compact_background: [24, 22, 20, 248],
+                progress_track: [66, 59, 51, 255],
+                progress_fill: [242, 184, 75, 255],
+                divider: [72, 64, 55, 180],
+                compact_dot: [116, 109, 101, 255],
+                expanded_chevron: [242, 184, 75, 255],
+                compact_chevron: [222, 169, 71, 255],
+                primary: [246, 242, 234],
+                muted: [138, 132, 125],
+                accent: [242, 184, 75],
+                lightning: [225, 171, 69],
+                credit: [216, 168, 74],
+                secondary: [198, 190, 179],
+                expanded_helper: [184, 176, 165],
+                expanded_status: [129, 123, 116],
+            },
+        }
+    }
 }
 
 pub fn expanded_height_for_window_count(window_count: usize) -> i32 {
@@ -94,6 +170,7 @@ pub fn build_render_model(
     NativeRenderModel {
         status: snapshot.status.clone(),
         credit_status: credits.status.clone(),
+        theme: Theme::Dark,
         expanded,
         edge_tab: false,
         size,
@@ -580,6 +657,7 @@ fn draw_surface(
     compact_layout: Option<&CompactLayout>,
 ) {
     pixels.fill(0);
+    let palette = ThemePalette::for_theme(model.theme);
     let compact = compact_layout;
     let design_width = compact.map(|layout| layout.width as f32).unwrap_or(320.0);
     let scale = width.max(1) as f32 / design_width;
@@ -598,21 +676,21 @@ fn draw_surface(
             tab_left + tab_width,
             height,
             scaled(3, scale),
-            premultiplied_bgra(247, 192, 87, 245),
+            palette_rgba(palette.edge_tab),
         );
         return;
     }
 
     let radius = scaled(if model.expanded { 12 } else { 14 }, scale);
     let border = if model.expanded {
-        premultiplied_bgra(242, 184, 75, 220)
+        palette_rgba(palette.expanded_border)
     } else {
-        premultiplied_bgra(247, 192, 87, 235)
+        palette_rgba(palette.compact_border)
     };
     let background = if model.expanded {
-        premultiplied_bgra(28, 25, 22, 245)
+        palette_rgba(palette.expanded_background)
     } else {
-        premultiplied_bgra(24, 22, 20, 248)
+        palette_rgba(palette.compact_background)
     };
     fill_rounded(pixels, width, height, 0, 0, width, height, radius, border);
     fill_rounded(
@@ -630,8 +708,8 @@ fn draw_surface(
     if model.expanded {
         let bar_left = scaled(16, scale);
         let bar_right = width - scaled(16, scale);
-        let track = premultiplied_bgra(66, 59, 51, 255);
-        let fill = premultiplied_bgra(242, 184, 75, 255);
+        let track = palette_rgba(palette.progress_track);
+        let fill = palette_rgba(palette.progress_fill);
         for (index, window) in model.windows.iter().enumerate() {
             let row = expanded_row_layout(model.windows.len(), index);
             let bar_top = scaled(row.bar_top, scale);
@@ -661,7 +739,7 @@ fn draw_surface(
                 fill,
             );
         }
-        let divider = premultiplied_bgra(72, 64, 55, 180);
+        let divider = palette_rgba(palette.divider);
         fill_rect(
             pixels,
             width,
@@ -688,7 +766,7 @@ fn draw_surface(
                 dot_left + dot_size,
                 dot_top + dot_size,
                 (dot_size / 2).max(1),
-                premultiplied_bgra(116, 109, 101, 255),
+                palette_rgba(palette.compact_dot),
             );
         }
     }
@@ -712,9 +790,9 @@ fn draw_surface(
         },
         model.expanded,
         if model.expanded {
-            premultiplied_bgra(242, 184, 75, 255)
+            palette_rgba(palette.expanded_chevron)
         } else {
-            premultiplied_bgra(222, 169, 71, 255)
+            palette_rgba(palette.compact_chevron)
         },
     );
 }
@@ -738,12 +816,13 @@ fn draw_text_surface(
     let compact = compact_layout;
     let design_width = compact.map(|layout| layout.width as f32).unwrap_or(320.0);
     let scale = model.size.width.max(1) as f32 / design_width;
-    let white = rgb(246, 242, 234);
-    let muted = rgb(138, 132, 125);
-    let accent = rgb(242, 184, 75);
-    let lightning = rgb(225, 171, 69);
-    let credit_accent = rgb(216, 168, 74);
-    let secondary = rgb(198, 190, 179);
+    let palette = ThemePalette::for_theme(model.theme);
+    let white = palette_rgb(palette.primary);
+    let muted = palette_rgb(palette.muted);
+    let accent = palette_rgb(palette.accent);
+    let lightning = palette_rgb(palette.lightning);
+    let credit_accent = palette_rgb(palette.credit);
+    let secondary = palette_rgb(palette.secondary);
 
     unsafe {
         let _ = SetBkMode(hdc, TRANSPARENT);
@@ -755,10 +834,10 @@ fn draw_text_surface(
             let expanded_percentage_size = scaled(18, scale);
             let expanded_helper_size = scaled(11, scale);
             let expanded_primary = white;
-            let expanded_percentage = rgb(242, 184, 75);
-            let expanded_credit = rgb(216, 168, 74);
-            let expanded_helper = rgb(184, 176, 165);
-            let expanded_status = rgb(129, 123, 116);
+            let expanded_percentage = palette_rgb(palette.accent);
+            let expanded_credit = palette_rgb(palette.credit);
+            let expanded_helper = palette_rgb(palette.expanded_helper);
+            let expanded_status = palette_rgb(palette.expanded_status);
             let content_left = scaled(16, scale);
             let content_right = model.size.width - scaled(16, scale);
 
@@ -1090,7 +1169,11 @@ fn draw_text_surface(
                     0,
                 ),
                 collapsed_status_size,
-                rgb(116, 109, 101),
+                palette_rgb([
+                    palette.compact_dot[0],
+                    palette.compact_dot[1],
+                    palette.compact_dot[2],
+                ]),
                 FW_NORMAL.0 as i32,
             );
             draw_text(
@@ -1149,10 +1232,23 @@ fn draw_text_surface(
             bottom,
         }
     }
+}
 
-    fn rgb(red: u32, green: u32, blue: u32) -> COLORREF {
-        COLORREF(red | (green << 8) | (blue << 16))
-    }
+#[cfg(windows)]
+fn palette_rgb(color: [u8; 3]) -> windows::Win32::Foundation::COLORREF {
+    windows::Win32::Foundation::COLORREF(
+        u32::from(color[0]) | (u32::from(color[1]) << 8) | (u32::from(color[2]) << 16),
+    )
+}
+
+#[cfg(windows)]
+fn palette_rgba(color: [u8; 4]) -> u32 {
+    premultiplied_bgra(
+        u32::from(color[0]),
+        u32::from(color[1]),
+        u32::from(color[2]),
+        u32::from(color[3]),
+    )
 }
 
 #[cfg(windows)]
@@ -1596,5 +1692,34 @@ mod tests {
     fn invalid_credit_balance_falls_back_to_original_string() {
         assert_eq!(format_credit_balance("balance-unknown"), "balance-unknown");
         assert_eq!(format_credit_balance("NaN"), "NaN");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod theme_tests {
+    use super::ThemePalette;
+    use crate::settings::Theme;
+
+    #[test]
+    fn dark_palette_preserves_the_phase_6_surface_and_text_colors() {
+        let palette = ThemePalette::for_theme(Theme::Dark);
+
+        assert_eq!(palette.expanded_background, [28, 25, 22, 245]);
+        assert_eq!(palette.compact_background, [24, 22, 20, 248]);
+        assert_eq!(palette.primary, [246, 242, 234]);
+        assert_eq!(palette.accent, [242, 184, 75]);
+        assert_eq!(palette.credit, [216, 168, 74]);
+    }
+
+    #[test]
+    fn light_palette_changes_colors_without_changing_palette_roles() {
+        let dark = ThemePalette::for_theme(Theme::Dark);
+        let light = ThemePalette::for_theme(Theme::Light);
+
+        assert_ne!(light.expanded_background, dark.expanded_background);
+        assert_ne!(light.compact_background, dark.compact_background);
+        assert_ne!(light.primary, dark.primary);
+        assert_eq!(light.progress_fill.len(), dark.progress_fill.len());
+        assert_eq!(light.primary.len(), dark.primary.len());
     }
 }

@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-There is no public application release yet. Security fixes are accepted for the current development line only. This policy will be updated when versioned releases are published.
+There is no published application release yet. Security fixes are accepted for the current development line only. This policy will be updated when versioned releases are published.
 
 | Version | Supported |
 |---|---|
@@ -11,11 +11,11 @@ There is no public application release yet. Security fixes are accepted for the 
 
 ## Reporting a Vulnerability
 
-After the GitHub repository is created, use GitHub's private vulnerability reporting feature under the repository's **Security** tab. Include a concise description, affected component, reproduction steps, and impact.
+Use GitHub's private vulnerability reporting feature under the repository's **Security** tab if it is enabled. Include a concise description, affected component, reproduction steps, and impact.
 
 If private vulnerability reporting is not yet available, open a public issue containing only a request for a private maintainer contact. Do **not** include vulnerability details or sensitive data in that issue.
 
-Please allow maintainers reasonable time to acknowledge, investigate, and coordinate a fix before public disclosure. Response targets will be documented after the maintainer channel and release process exist.
+Please allow maintainers reasonable time to acknowledge, investigate, and coordinate a fix before public disclosure. Response timing may vary while the project remains in development.
 
 ## Never Share Publicly
 
@@ -33,7 +33,7 @@ If sensitive data is posted accidentally, revoke or rotate it immediately and as
 
 Codex Usage Notch is designed not to read or collect prompts, conversations, or project code. Its usage-data design does not require OCR, screenshots, webpage DOM scraping, an OpenAI password, or application-managed credential storage.
 
-The planned application will delegate authentication to a Codex-owned local process. That process may use Codex's existing login internally; this project must not expose arbitrary protocol passthrough or copy the underlying credentials.
+The application delegates authentication to a Codex-owned local process. That process may use Codex's existing login internally; this project must not expose arbitrary protocol passthrough or copy the underlying credentials.
 
 ## Scope
 

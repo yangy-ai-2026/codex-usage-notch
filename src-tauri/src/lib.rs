@@ -1,10 +1,13 @@
 pub mod engine;
 pub mod native_overlay;
 pub mod native_renderer;
+pub mod settings;
+pub mod startup;
 pub mod window_geometry;
 pub mod window_tracker;
 
 pub use engine::UsageSnapshot;
+pub use settings::{resolve_theme, AppSettings, Theme};
 pub use window_geometry::{
     place_top_center, read_window_geometry, scale_size_for_dpi, NotchPlacement, Rect, WindowDpi,
     WindowGeometrySnapshot, WindowSize,
@@ -35,11 +38,22 @@ fn set_notch_expanded(expanded: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn resolve_startup_settings(mut settings: AppSettings) -> AppSettings {
+    settings.theme = resolve_theme(settings.theme);
+    settings
+}
+
 pub fn run() {
     native_overlay::initialize_dpi_awareness();
+    let loaded_settings = AppSettings::load();
+    let settings = resolve_startup_settings(loaded_settings);
+    if let Err(error) = startup::apply(settings.start_with_windows) {
+        eprintln!("failed to update Windows startup registration: {error}");
+    }
     tauri::Builder::default()
         .manage(std::sync::Mutex::new(WindowDiscovery::default()))
-        .setup(|app| {
+        .manage(std::sync::Mutex::new(settings.clone()))
+        .setup(move |app| {
             #[cfg(windows)]
             {
                 use tauri::Manager;
@@ -50,7 +64,7 @@ pub fn run() {
                 window
                     .hide()
                     .map_err(|error| format!("failed to hide Tauri controller window: {error}"))?;
-                native_overlay::start();
+                native_overlay::start(settings);
             }
             Ok(())
         })
@@ -67,4 +81,20 @@ pub fn run() {
                 native_overlay::stop();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_startup_settings, AppSettings, Theme};
+
+    #[test]
+    fn startup_settings_pass_a_concrete_theme_to_runtime() {
+        let mut settings = AppSettings::default();
+        settings.theme = Theme::Dark;
+
+        let resolved = resolve_startup_settings(settings);
+
+        assert_eq!(resolved.theme, Theme::Dark);
+        assert_ne!(resolved.theme, Theme::System);
+    }
 }
