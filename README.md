@@ -52,6 +52,17 @@ See [SECURITY.md](SECURITY.md) for reporting and disclosure guidance.
 
 There is no installer or downloadable release yet. Current work is focused on the first public version described in the [public roadmap](ROADMAP.md).
 
+## Release Convention
+
+The v0.1.0 release artifacts use this naming convention:
+
+- App version: `0.1.0`
+- Future Git tag: `v0.1.0`
+- Installer: `QuotaStrip_0.1.0_x64-setup.exe`
+- GitHub Release title: `QuotaStrip v0.1.0`
+
+The Windows CI workflow produces the NSIS installer as the `quotastrip-nsis` artifact. A Git tag, GitHub Release, checksum, and binary signature are separate later steps.
+
 ## Contributing
 
 The project is at an early foundation stage. Issues and focused proposals are welcome, but contributors should not present planned behavior as already implemented. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request.

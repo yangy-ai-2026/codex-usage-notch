@@ -22,6 +22,9 @@ jobs:
           node-version: 22.23.1
           cache: npm
 
+      - name: Check release version consistency
+        run: npm run release:check-version
+
       - name: Install npm dependencies
         run: npm ci
 
@@ -39,19 +42,24 @@ jobs:
 
       - name: Run Rust tests
         working-directory: src-tauri
-        run: cargo test --all-targets
+        run: cargo test --all-targets --locked
 
       - name: Check Rust targets
         working-directory: src-tauri
-        run: cargo check --all-targets
+        run: cargo check --all-targets --locked
 
       - name: Build Tauri NSIS installer
-        run: npm run tauri build
+        run: npm run tauri build -- -- --locked
+
+      - name: Verify NSIS artifact
+        run: npm run release:verify-artifact
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
           name: quotastrip-nsis
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/artifact-manifest.txt
           if-no-files-found: error
           retention-days: 14
