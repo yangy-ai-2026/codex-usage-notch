@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-const SETTINGS_DIRECTORY: &str = "Codex Usage Notch";
+const SETTINGS_DIRECTORY: &str = "QuotaStrip";
 const SETTINGS_FILE: &str = "settings.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,7 +190,7 @@ mod tests {
             .as_nanos();
         std::env::temp_dir()
             .join(format!(
-                "codex-usage-notch-settings-{label}-{}",
+                "quotastrip-settings-{label}-{}",
                 std::process::id()
             ))
             .join(format!("{unique}.json"))

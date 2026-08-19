@@ -1,10 +1,10 @@
-# Codex Usage Notch
+# QuotaStrip
 
 > The usage notch that stays attached to your Codex window on Windows.
 
 **Status:** `v0.1.0 — Phase 5 CLOSED / PASS; release work remains`
 
-Codex Usage Notch is an early-stage, lightweight Windows utility that keeps account usage information close to the Codex Desktop window. The v0.1.0 application foundation, usage engine, and Phase 5 native Notch foundation are validated locally; no public build is currently available.
+QuotaStrip is an early-stage, lightweight Windows utility that keeps account usage information close to the Codex Desktop window. The v0.1.0 application foundation, usage engine, and Phase 5 native Notch foundation are validated locally; no public build is currently available.
 
 ## Why
 

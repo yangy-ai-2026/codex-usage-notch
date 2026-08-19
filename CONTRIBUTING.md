@@ -1,6 +1,6 @@
-# Contributing to Codex Usage Notch
+# Contributing to QuotaStrip
 
-Thanks for helping build Codex Usage Notch.
+Thanks for helping build QuotaStrip.
 
 ## Development Status
 

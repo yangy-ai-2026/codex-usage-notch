@@ -74,7 +74,7 @@ pub fn run() {
             set_notch_expanded
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Codex Usage Notch")
+        .expect("error while building QuotaStrip")
         .run(|_, event| {
             #[cfg(windows)]
             if matches!(event, tauri::RunEvent::Exit) {

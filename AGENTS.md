@@ -4,7 +4,7 @@ This file defines the default engineering rules for the entire repository. Follo
 
 ## 1. Project Scope
 
-- Project: **Codex Usage Notch**.
+- Project: **QuotaStrip**.
 - Current release target: `v0.1.0`.
 - Platform strategy: Windows-first, targeting Windows 10 and Windows 11.
 - Core positioning: **The usage notch that stays attached to your Codex window on Windows.**

@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Codex Usage Notch is Windows-first and intentionally narrow for v0.1.0. Describe the user problem before proposing a solution, and do not include private data.
+        QuotaStrip is Windows-first and intentionally narrow for v0.1.0. Describe the user problem before proposing a solution, and do not include private data.
   - type: textarea
     id: problem
     attributes:
@@ -48,7 +48,7 @@ body:
   - type: input
     id: app-version
     attributes:
-      label: Codex Usage Notch version
+      label: QuotaStrip version
       description: Use "unreleased" if no packaged application exists.
     validations:
       required: true

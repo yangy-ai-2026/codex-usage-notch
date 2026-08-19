@@ -1,7 +1,7 @@
 use std::path::Path;
 
 const RUN_KEY_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const RUN_VALUE_NAME: &str = "Codex Usage Notch";
+const RUN_VALUE_NAME: &str = "QuotaStrip";
 
 #[derive(Debug, PartialEq, Eq)]
 enum StartupAction {
@@ -139,13 +139,11 @@ mod tests {
 
     #[test]
     fn enabled_startup_registers_quoted_current_executable() {
-        let executable = Path::new(r"C:\Program Files\Codex Usage Notch\notch.exe");
+        let executable = Path::new(r"C:\Program Files\QuotaStrip\quotastrip.exe");
 
         assert_eq!(
             startup_action(true, executable),
-            StartupAction::Register(
-                r#""C:\Program Files\Codex Usage Notch\notch.exe""#.to_string()
-            )
+            StartupAction::Register(r#""C:\Program Files\QuotaStrip\quotastrip.exe""#.to_string())
         );
     }
 
@@ -163,6 +161,6 @@ mod tests {
             RUN_KEY_PATH,
             r"Software\Microsoft\Windows\CurrentVersion\Run"
         );
-        assert_eq!(RUN_VALUE_NAME, "Codex Usage Notch");
+        assert_eq!(RUN_VALUE_NAME, "QuotaStrip");
     }
 }

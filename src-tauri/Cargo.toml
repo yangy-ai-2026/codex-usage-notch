@@ -1,18 +1,18 @@
 [package]
-name = "codex-usage-notch"
-default-run = "codex-usage-notch"
+name = "quotastrip"
+default-run = "quotastrip"
 version = "0.1.0"
-description = "Codex Usage Notch native application"
-authors = ["Codex Usage Notch contributors"]
+description = "QuotaStrip native application"
+authors = ["QuotaStrip contributors"]
 edition = "2021"
 autobins = false
 
 [lib]
-name = "codex_usage_notch_lib"
+name = "quotastrip_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "codex-usage-notch"
+name = "quotastrip"
 path = "src/main.rs"
 
 [build-dependencies]

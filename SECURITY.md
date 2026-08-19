@@ -31,7 +31,7 @@ If sensitive data is posted accidentally, revoke or rotate it immediately and as
 
 ## Privacy Boundary
 
-Codex Usage Notch is designed not to read or collect prompts, conversations, or project code. Its usage-data design does not require OCR, screenshots, webpage DOM scraping, an OpenAI password, or application-managed credential storage.
+QuotaStrip is designed not to read or collect prompts, conversations, or project code. Its usage-data design does not require OCR, screenshots, webpage DOM scraping, an OpenAI password, or application-managed credential storage.
 
 The application delegates authentication to a Codex-owned local process. That process may use Codex's existing login internally; this project must not expose arbitrary protocol passthrough or copy the underlying credentials.
 
