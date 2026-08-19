@@ -54,6 +54,9 @@ jobs:
       - name: Verify NSIS artifact
         run: npm run release:verify-artifact
 
+      - name: Generate and verify SHA256 checksum
+        run: npm run release:verify-sha256
+
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
@@ -61,5 +64,6 @@ jobs:
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/release/bundle/nsis/artifact-manifest.txt
+            src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

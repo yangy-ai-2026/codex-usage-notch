@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "release:check-version": "node scripts/check-release-version.mjs",
     "release:verify-artifact": "node scripts/verify-release-artifact.mjs",
+    "release:verify-sha256": "node scripts/verify-release-sha256.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
