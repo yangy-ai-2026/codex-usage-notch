@@ -247,6 +247,14 @@ pub fn set_expanded(expanded: bool) {
 pub fn set_expanded(_expanded: bool) {}
 
 #[cfg(windows)]
+pub fn show() {
+    TRACKER_DIRTY.store(true, Ordering::Release);
+}
+
+#[cfg(not(windows))]
+pub fn show() {}
+
+#[cfg(windows)]
 pub fn stop() {
     use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
@@ -373,7 +381,7 @@ fn create_native_window(instance: windows::Win32::Foundation::HINSTANCE) -> Opti
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
             class_name,
-            windows::core::w!("Codex Usage Notch Native Overlay"),
+            windows::core::w!("QuotaStrip Native Overlay"),
             WS_POPUP,
             0,
             0,

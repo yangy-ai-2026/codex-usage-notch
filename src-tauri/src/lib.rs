@@ -57,7 +57,29 @@ pub fn run() {
         .setup(move |app| {
             #[cfg(windows)]
             {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::TrayIconBuilder;
                 use tauri::Manager;
+
+                let show_overlay =
+                    MenuItem::with_id(app, "show-overlay", "Show Overlay", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_overlay, &quit])?;
+                let icon = app
+                    .default_window_icon()
+                    .cloned()
+                    .ok_or_else(|| "default QuotaStrip icon is unavailable".to_string())?;
+
+                TrayIconBuilder::with_id("quotastrip-tray")
+                    .icon(icon)
+                    .menu(&menu)
+                    .tooltip("QuotaStrip")
+                    .on_menu_event(|app, event| match event.id().as_ref() {
+                        "show-overlay" => native_overlay::show(),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .build(app)?;
 
                 let window = app
                     .get_webview_window("main")

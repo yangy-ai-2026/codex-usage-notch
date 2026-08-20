@@ -2,9 +2,9 @@
 
 > The usage notch that stays attached to your Codex window on Windows.
 
-**Status:** `v0.1.0 — Phase 5 CLOSED / PASS; release work remains`
+**Status:** `v0.1.0 — Phase 8 release hardening implementation complete; final manual tray/exit acceptance pending`
 
-QuotaStrip is an early-stage, lightweight Windows utility that keeps account usage information close to the Codex Desktop window. The v0.1.0 application foundation, usage engine, and Phase 5 native Notch foundation are validated locally; no public build is currently available.
+QuotaStrip is a lightweight Windows desktop utility that keeps account usage information close to the Codex Desktop window. The current v0.1.0 build includes the attached overlay, Windows tray icon support, and an NSIS installer. Final manual tray and graceful-exit acceptance remains pending before public release publication.
 
 ## Why
 
@@ -28,10 +28,11 @@ The initial target is Windows 10 and Windows 11. macOS and Linux are outside the
 
 ## Current Technical Status
 
-- The product is in early development.
-- The core usage-data and Windows window-attachment approaches have been validated locally.
-- The Tauri/React application foundation, Codex-owned usage engine, and native Windows Notch foundation are validated through Phase 5.
-- A public production build, installer, and release do not exist yet.
+- The current version is `0.1.0`.
+- The Windows desktop overlay and Codex-owned usage engine have been validated locally.
+- The application includes a Windows system tray icon with overlay refresh and graceful Quit actions.
+- The Windows CI workflow produces a reproducible NSIS installer and verifies its SHA256 checksum.
+- A public GitHub Release has not yet been published; release publication remains separate from CI artifact generation.
 
 ## Privacy Principles
 
@@ -50,7 +51,7 @@ See [SECURITY.md](SECURITY.md) for reporting and disclosure guidance.
 
 ## Development Status
 
-There is no installer or downloadable release yet. Current work is focused on the first public version described in the [public roadmap](ROADMAP.md).
+The current Windows build is distributed as a CI NSIS artifact while final manual acceptance is completed. See the [public roadmap](ROADMAP.md) for the v0.1.0 scope.
 
 ## Release Convention
 
@@ -61,7 +62,7 @@ The v0.1.0 release artifacts use this naming convention:
 - Installer: `QuotaStrip_0.1.0_x64-setup.exe`
 - GitHub Release title: `QuotaStrip v0.1.0`
 
-The Windows CI workflow produces the NSIS installer as the `quotastrip-nsis` artifact. A Git tag, GitHub Release, checksum, and binary signature are separate later steps.
+The Windows CI workflow produces the NSIS installer as the `quotastrip-nsis` artifact and verifies `SHA256SUMS.txt`. A Git tag, GitHub Release publication, and binary signature remain separate later steps.
 
 ## Contributing
 
