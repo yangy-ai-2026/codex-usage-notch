@@ -37,10 +37,10 @@ pub fn discover_binary() -> Result<String, ProtocolError> {
             candidates.push(explicit);
         }
     }
-    let output = Command::new("where.exe")
-        .arg("codex")
-        .output()
-        .map_err(ProtocolError::Spawn)?;
+    let mut command = Command::new("where.exe");
+    command.arg("codex");
+    configure_no_console(&mut command);
+    let output = command.output().map_err(ProtocolError::Spawn)?;
     if output.status.success() {
         candidates.extend(
             String::from_utf8_lossy(&output.stdout)

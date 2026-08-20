@@ -2,6 +2,7 @@ pub mod engine;
 pub mod native_overlay;
 pub mod native_renderer;
 pub mod settings;
+pub mod single_instance;
 pub mod startup;
 pub mod window_geometry;
 pub mod window_tracker;
