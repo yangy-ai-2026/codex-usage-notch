@@ -77,9 +77,9 @@ QuotaStrip keeps a compact usage notch attached to the Codex Desktop window on W
 ## Installation
 
 > [!NOTE]
-> QuotaStrip `v0.1.0` is preparing its first public release. The [Releases page](https://github.com/yangy-ai-2026/quotastrip/releases) will be the only download source; no public download is available yet.
+> QuotaStrip `v0.1.0` is available from [QuotaStrip v0.1.0](https://github.com/yangy-ai-2026/quotastrip/releases/tag/v0.1.0).
 
-When published, download the Windows NSIS installer `QuotaStrip_0.1.0_x64-setup.exe` and verify it against the accompanying `SHA256SUMS.txt` file.
+Download the Windows NSIS installer `QuotaStrip_0.1.0_x64-setup.exe` and verify it against [SHA256SUMS.txt](https://github.com/yangy-ai-2026/quotastrip/releases/download/v0.1.0/SHA256SUMS.txt) before installation. `v0.1.0` is unsigned, so Windows SmartScreen may display a warning; download only from the official Release and verify the SHA256 checksum.
 
 ## How It Works
 
@@ -134,11 +134,11 @@ QuotaStrip needs a detectable Codex Desktop window to attach its overlay. When C
 
 ### Where will `v0.1.0` be downloaded?
 
-The GitHub [Releases page](https://github.com/yangy-ai-2026/quotastrip/releases) will be the only public download source when the first release is published.
+Download `v0.1.0` from [QuotaStrip v0.1.0](https://github.com/yangy-ai-2026/quotastrip/releases/tag/v0.1.0), the official GitHub Release.
 
 ### Why might Windows show a SmartScreen warning?
 
-No binary signature has been published for `v0.1.0` yet. Download only from GitHub Releases once available and verify the published SHA256 checksum before trusting an installer.
+`v0.1.0` is unsigned. Download only from the official GitHub Release and verify the published SHA256 checksum before trusting an installer.
 
 ## Troubleshooting
 
@@ -152,7 +152,7 @@ Use **Show Overlay** first. If the overlay still does not appear, fully quit Quo
 
 ### I need to verify an installer
 
-There is no public installer download yet. After the first release is published, obtain the installer only from GitHub Releases and compare it with the accompanying `SHA256SUMS.txt` file.
+Obtain the installer only from [QuotaStrip v0.1.0](https://github.com/yangy-ai-2026/quotastrip/releases/tag/v0.1.0) and compare it with the accompanying `SHA256SUMS.txt` file.
 
 ### Windows warns about an installer
 
@@ -162,7 +162,7 @@ Treat SmartScreen or signing warnings cautiously. Do not bypass a warning unless
 
 The Windows CI workflow verifies version consistency, builds the Windows application and NSIS installer, and verifies the installer artifact and SHA256 checksum.
 
-`v0.1.0` is still in release preparation: no Git tag, GitHub Release, public installer download, or binary signature has been published.
+`v0.1.0` is published for Windows. The binary is unsigned, so Windows SmartScreen may display a warning; verify the SHA256 checksum before installation.
 
 ## Roadmap
 

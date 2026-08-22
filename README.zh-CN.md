@@ -77,9 +77,9 @@ QuotaStrip 会将一个紧凑的用量 Notch 贴合在 Windows 上的 Codex Desk
 ## 安装
 
 > [!NOTE]
-> QuotaStrip `v0.1.0` 正在准备首次公开发布。GitHub [Releases 页面](https://github.com/yangy-ai-2026/quotastrip/releases) 将是唯一的下载入口；目前尚无公开下载。
+> QuotaStrip `v0.1.0` 已正式发布，可从 [QuotaStrip v0.1.0](https://github.com/yangy-ai-2026/quotastrip/releases/tag/v0.1.0) 下载。
 
-发布后，请下载 Windows NSIS 安装程序 `QuotaStrip_0.1.0_x64-setup.exe`，并使用随附的 `SHA256SUMS.txt` 文件验证 SHA256 校验和。
+请下载 Windows NSIS 安装程序 `QuotaStrip_0.1.0_x64-setup.exe`，并在安装前使用 [SHA256SUMS.txt](https://github.com/yangy-ai-2026/quotastrip/releases/download/v0.1.0/SHA256SUMS.txt) 验证 SHA256 校验和。`v0.1.0` 未签名，Windows SmartScreen 可能显示警告；请仅从官方 Release 下载并验证 SHA256 校验和。
 
 ## 工作原理
 
@@ -134,11 +134,11 @@ QuotaStrip 需要检测到 Codex Desktop 窗口才能贴合悬浮层。重新打
 
 ### `v0.1.0` 将从哪里下载？
 
-首次发布后，GitHub [Releases 页面](https://github.com/yangy-ai-2026/quotastrip/releases) 将是唯一的公开下载入口。
+请从 [QuotaStrip v0.1.0](https://github.com/yangy-ai-2026/quotastrip/releases/tag/v0.1.0) 下载，这是官方 GitHub Release。
 
 ### 为什么 Windows 可能显示 SmartScreen 警告？
 
-`v0.1.0` 尚未发布二进制签名。首次发布后，请仅从 GitHub Releases 下载，并在信任安装程序前验证已发布的 SHA256 校验和。
+`v0.1.0` 未签名。请仅从官方 GitHub Release 下载，并在信任安装程序前验证已发布的 SHA256 校验和。
 
 ## 故障排查
 
@@ -152,7 +152,7 @@ QuotaStrip 需要检测到 Codex Desktop 窗口才能贴合悬浮层。重新打
 
 ### 我需要验证安装程序
 
-目前没有公开安装程序下载。首次发布后，请仅从 GitHub Releases 获取安装程序，并与随附的 `SHA256SUMS.txt` 文件比对。
+请仅从 [QuotaStrip v0.1.0](https://github.com/yangy-ai-2026/quotastrip/releases/tag/v0.1.0) 获取安装程序，并与随附的 `SHA256SUMS.txt` 文件比对。
 
 ### Windows 对安装程序发出警告
 
@@ -162,7 +162,7 @@ QuotaStrip 需要检测到 Codex Desktop 窗口才能贴合悬浮层。重新打
 
 Windows CI 工作流会验证版本一致性、构建 Windows 应用和 NSIS 安装程序，并验证安装程序产物及 SHA256 校验和。
 
-`v0.1.0` 仍处于发布准备阶段：尚未发布 Git tag、GitHub Release、公开安装程序下载或二进制签名。
+`v0.1.0` 已面向 Windows 发布。二进制文件未签名，Windows SmartScreen 可能显示警告；请在安装前验证 SHA256 校验和。
 
 ## 路线图
 
